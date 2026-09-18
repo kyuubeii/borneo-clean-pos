@@ -3,17 +3,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useT, LocaleToggle } from "@/components/I18nProvider";
 
-const DEMO = [
-  { email: "owner@borneoclean.my", password: "owner123", role: "Owner" },
-  { email: "admin@borneoclean.my", password: "admin123", role: "Admin" },
-  { email: "aisyah@borneoclean.my", password: "staff123", role: "Cleaner" },
-];
-
 export default function Login() {
   const t = useT();
   const router = useRouter();
-  const [email, setEmail] = useState("owner@borneoclean.my");
-  const [password, setPassword] = useState("owner123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -55,19 +49,6 @@ export default function Login() {
           {err && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{err}</p>}
           <button className="btn-primary w-full" disabled={busy}>{busy ? "…" : t("auth.signIn")}</button>
         </form>
-
-        <div className="mt-4 card card-pad">
-          <p className="mb-2 text-xs font-semibold text-ink-500">{t("auth.demo")}</p>
-          <div className="space-y-1.5">
-            {DEMO.map((d) => (
-              <button key={d.email} onClick={() => { setEmail(d.email); setPassword(d.password); }}
-                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs hover:bg-ink-50">
-                <span className="font-medium text-ink-700">{d.email}</span>
-                <span className="text-ink-400">{d.role}</span>
-              </button>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );

@@ -59,7 +59,7 @@ export const dict = {
     "ai.intro": "I can search your business data and take actions for you.",
     "ai.clear": "New conversation", "ai.ranAction": "Ran",
     "auth.signIn": "Sign in", "auth.password": "Password", "auth.signOut": "Sign out",
-    "auth.invalid": "Wrong email or password", "auth.demo": "Demo accounts",
+    "auth.invalid": "Wrong email or password",
   },
   zh: {
     "app.name": "婆罗洲清洁", "app.tagline": "清洁业务管理",
@@ -119,7 +119,7 @@ export const dict = {
     "ai.intro": "我可以查询业务数据，也能替你执行操作。",
     "ai.clear": "新对话", "ai.ranAction": "已执行",
     "auth.signIn": "登录", "auth.password": "密码", "auth.signOut": "退出登录",
-    "auth.invalid": "邮箱或密码错误", "auth.demo": "演示账号",
+    "auth.invalid": "邮箱或密码错误",
   },
 } as const;
 
