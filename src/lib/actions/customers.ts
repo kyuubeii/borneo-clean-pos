@@ -7,7 +7,7 @@ const ALL = ["OWNER", "ADMIN"] as const;
 defineAction({
   name: "customers.search",
   description: "Search customers by name, email, phone or company. Returns matching customer profiles with their addresses. Use this first whenever a request names a customer.",
-  category: "Customers", roles: ["OWNER", "ADMIN", "STAFF"], readOnly: true,
+  category: "Customers", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ query: z.string().optional().describe("Free text to match against name, email, phone or company"), limit: z.number().int().min(1).max(50).default(20) }),
   handler: async ({ query, limit }) => {
     const where = query ? { OR: [
@@ -23,7 +23,7 @@ defineAction({
 defineAction({
   name: "customers.get",
   description: "Get one customer's full record: contact details, addresses, bookings, jobs, invoices and payment history.",
-  category: "Customers", roles: ["OWNER", "ADMIN", "STAFF"], readOnly: true,
+  category: "Customers", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ customerId: z.string() }),
   handler: async ({ customerId }) => {
     const c = await db.customer.findUnique({ where: { id: customerId }, include: {

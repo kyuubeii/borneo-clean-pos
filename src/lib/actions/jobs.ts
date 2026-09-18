@@ -21,7 +21,9 @@ defineAction({
     staffId: z.string().optional(), customerId: z.string().optional(),
     limit: z.number().int().max(100).default(50),
   }),
-  handler: async ({ from, to, status, staffId, customerId, limit }) => {
+  handler: async ({ from, to, status, staffId, customerId, limit }, ctx) => {
+    // A cleaner only ever sees their own jobs, whoever is asking for them.
+    if (ctx.user.role === "STAFF") staffId = ctx.user.staffId ?? "__none__";
     const rows = await db.job.findMany({
       where: {
         ...(status ? { status } : {}), ...(customerId ? { customerId } : {}),
@@ -45,9 +47,12 @@ defineAction({
   description: "Get one job in full: instructions, notes, checklist, assigned cleaners, photos, time entries and costing.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"], readOnly: true,
   input: z.object({ jobId: z.string() }),
-  handler: async ({ jobId }) => {
+  handler: async ({ jobId }, ctx) => {
     const j = await db.job.findUnique({ where: { id: jobId }, include: JOB_INCLUDE as any });
     if (!j) throw new ActionError("Job not found");
+    if (ctx.user.role === "STAFF" && !(j as any).assignments.some((a: any) => a.staffId === ctx.user.staffId)) {
+      throw new ActionError("You are not assigned to this job");
+    }
     return j;
   },
 });

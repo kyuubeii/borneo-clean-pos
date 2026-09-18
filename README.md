@@ -59,7 +59,11 @@ From that single declaration the system derives, with no duplication:
 means writing one `defineAction`. The assistant can use it immediately — no chatbot
 code changes, no prompt edits, no hand-written tool schemas to keep in sync.
 
-Currently **72 actions** across 15 categories. An Owner sees all 72; a Cleaner sees 22.
+Currently **72 actions** across 15 categories. An Owner sees all 72; a Cleaner sees 19.
+
+Scoping lives in the handler, not the page, so it holds for the UI and the assistant
+alike: `jobs.list` and `expenses.list` silently narrow to the caller's own records when
+the caller is a Cleaner, and `jobs.get` refuses a job they are not assigned to.
 
 ---
 

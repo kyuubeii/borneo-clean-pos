@@ -117,6 +117,9 @@ export async function POST(req: NextRequest) {
         const res = await runAction(call.function.name, args, { user, source: "assistant" });
 
         // Risky action — hand it back to the user to confirm, and pause the loop here.
+        // Any tool calls after this one in the same reply keep their placeholder result.
+        // History stays valid (that is what the placeholders are for); the model simply
+        // sees "awaiting confirmation" for calls that never ran, which is accurate.
         if (!res.ok && (res as any).needsConfirm) {
           const def = getAction(call.function.name);
           return NextResponse.json({ ok: true, threadId: thread, message: reply.content ?? "",
