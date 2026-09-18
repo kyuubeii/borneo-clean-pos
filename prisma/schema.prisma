@@ -1,0 +1,356 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      String   @default("STAFF") // OWNER | ADMIN | STAFF
+  active    Boolean  @default(true)
+  locale    String   @default("en")
+  staff     Staff?
+  createdAt DateTime @default(now())
+  auditLogs AuditLog[]
+  notifications Notification[]
+}
+
+model Staff {
+  id          String   @id @default(cuid())
+  userId      String?  @unique
+  user        User?    @relation(fields: [userId], references: [id])
+  name        String
+  phone       String?
+  email       String?
+  payType     String   @default("HOURLY") // HOURLY | PER_JOB | PERCENT
+  payRate     Int      @default(0)        // cents/hour, cents/job, or percent*100
+  active      Boolean  @default(true)
+  colour      String   @default("#3385fb")
+  notes       String?
+  createdAt   DateTime @default(now())
+  availability Availability[]
+  assignments JobAssignment[]
+  timeEntries TimeEntry[]
+  payouts     Payout[]
+  expenses    Expense[]
+}
+
+model Availability {
+  id       String @id @default(cuid())
+  staffId  String
+  staff    Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  weekday  Int    // 0=Sun
+  startMin Int    // minutes from midnight
+  endMin   Int
+}
+
+model Customer {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?
+  phone     String?
+  company   String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  addresses Address[]
+  bookings  Booking[]
+  jobs      Job[]
+  invoices  Invoice[]
+  quotes    Quote[]
+  payments  Payment[]
+}
+
+model Address {
+  id         String @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  label      String  @default("Home")
+  line1      String
+  line2      String?
+  city       String?
+  state      String?
+  postcode   String?
+  isPrimary  Boolean @default(false)
+  accessNotes String?
+  bookings   Booking[]
+  jobs       Job[]
+}
+
+model Service {
+  id          String  @id @default(cuid())
+  name        String
+  nameZh      String?
+  description String?
+  category    String  @default("General")
+  priceCents  Int     @default(0)
+  priceType   String  @default("FLAT") // FLAT | HOURLY | SQFT
+  durationMin Int     @default(120)
+  materialCostCents Int @default(0)
+  active      Boolean @default(true)
+  isAddon     Boolean @default(false)
+  createdAt   DateTime @default(now())
+  bookingItems BookingItem[]
+  quoteItems  QuoteItem[]
+}
+
+model Booking {
+  id          String   @id @default(cuid())
+  ref         String   @unique
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  addressId   String?
+  address     Address? @relation(fields: [addressId], references: [id])
+  status      String   @default("CONFIRMED") // PENDING | CONFIRMED | CANCELLED | COMPLETED
+  startAt     DateTime
+  durationMin Int      @default(120)
+  notes       String?
+  internalNotes String?
+  source      String   @default("ADMIN") // ADMIN | ONLINE | ASSISTANT
+  recurrence  String?  // NONE | WEEKLY | FORTNIGHTLY | MONTHLY
+  recurUntil  DateTime?
+  parentId    String?
+  parent      Booking? @relation("Series", fields: [parentId], references: [id])
+  children    Booking[] @relation("Series")
+  cancelReason String?
+  createdAt   DateTime @default(now())
+  items       BookingItem[]
+  job         Job?
+  quoteId     String?
+}
+
+model BookingItem {
+  id         String  @id @default(cuid())
+  bookingId  String
+  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  serviceId  String
+  service    Service @relation(fields: [serviceId], references: [id])
+  qty        Int     @default(1)
+  priceCents Int
+  name       String
+}
+
+model Job {
+  id          String   @id @default(cuid())
+  ref         String   @unique
+  bookingId   String?  @unique
+  booking     Booking? @relation(fields: [bookingId], references: [id])
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id])
+  addressId   String?
+  address     Address? @relation(fields: [addressId], references: [id])
+  status      String   @default("SCHEDULED") // SCHEDULED | EN_ROUTE | IN_PROGRESS | COMPLETED | CANCELLED
+  scheduledAt DateTime
+  durationMin Int      @default(120)
+  completedAt DateTime?
+  customerInstructions String?
+  internalNotes String?
+  staffNotes  String?
+  revenueCents Int     @default(0)
+  materialCostCents Int @default(0)
+  createdAt   DateTime @default(now())
+  assignments JobAssignment[]
+  checklist   ChecklistItem[]
+  photos      Photo[]
+  timeEntries TimeEntry[]
+  expenses    Expense[]
+  invoiceId   String?
+  invoice     Invoice? @relation(fields: [invoiceId], references: [id])
+}
+
+model JobAssignment {
+  id      String @id @default(cuid())
+  jobId   String
+  job     Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  staffId String
+  staff   Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  isLead  Boolean @default(false)
+  @@unique([jobId, staffId])
+}
+
+model ChecklistItem {
+  id     String  @id @default(cuid())
+  jobId  String
+  job    Job     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  label  String
+  done   Boolean @default(false)
+  sort   Int     @default(0)
+}
+
+model Photo {
+  id       String @id @default(cuid())
+  jobId    String
+  job      Job    @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  url      String
+  kind     String @default("BEFORE") // BEFORE | AFTER | ATTACHMENT
+  caption  String?
+  createdAt DateTime @default(now())
+}
+
+model TimeEntry {
+  id        String   @id @default(cuid())
+  jobId     String?
+  job       Job?     @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  staffId   String
+  staff     Staff    @relation(fields: [staffId], references: [id], onDelete: Cascade)
+  startAt   DateTime
+  endAt     DateTime?
+  note      String?
+}
+
+model Quote {
+  id         String   @id @default(cuid())
+  ref        String   @unique
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  status     String   @default("DRAFT") // DRAFT | SENT | ACCEPTED | DECLINED | EXPIRED
+  issuedAt   DateTime @default(now())
+  validUntil DateTime?
+  discountCents Int   @default(0)
+  taxRateBp  Int      @default(0) // basis points
+  notes      String?
+  convertedBookingId String?
+  createdAt  DateTime @default(now())
+  items      QuoteItem[]
+}
+
+model QuoteItem {
+  id        String  @id @default(cuid())
+  quoteId   String
+  quote     Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  serviceId String?
+  service   Service? @relation(fields: [serviceId], references: [id])
+  name      String
+  qty       Int     @default(1)
+  priceCents Int
+}
+
+model Invoice {
+  id         String   @id @default(cuid())
+  ref        String   @unique
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  status     String   @default("DRAFT") // DRAFT | SENT | PARTIAL | PAID | OVERDUE | VOID
+  issuedAt   DateTime @default(now())
+  dueAt      DateTime?
+  discountCents Int   @default(0)
+  taxRateBp  Int      @default(0)
+  notes      String?
+  createdAt  DateTime @default(now())
+  items      InvoiceItem[]
+  payments   Payment[]
+  jobs       Job[]
+}
+
+model InvoiceItem {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  name      String
+  qty       Int     @default(1)
+  priceCents Int
+}
+
+model Payment {
+  id         String   @id @default(cuid())
+  ref        String   @unique
+  invoiceId  String?
+  invoice    Invoice? @relation(fields: [invoiceId], references: [id])
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+  amountCents Int
+  method     String   @default("CASH") // CASH | BANK | CARD | EWALLET | CHEQUE
+  paidAt     DateTime @default(now())
+  reference  String?
+  isRefund   Boolean  @default(false)
+  note       String?
+  createdAt  DateTime @default(now())
+}
+
+model ExpenseCategory {
+  id     String @id @default(cuid())
+  name   String @unique
+  nameZh String?
+  expenses Expense[]
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  ref         String   @unique
+  categoryId  String?
+  category    ExpenseCategory? @relation(fields: [categoryId], references: [id])
+  jobId       String?
+  job         Job?     @relation(fields: [jobId], references: [id])
+  staffId     String?
+  staff       Staff?   @relation(fields: [staffId], references: [id])
+  amountCents Int
+  spentAt     DateTime @default(now())
+  vendor      String?
+  note        String?
+  receiptUrl  String?
+  reimbursable Boolean @default(false)
+  reimbursed  Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
+model Payout {
+  id         String   @id @default(cuid())
+  ref        String   @unique
+  staffId    String
+  staff      Staff    @relation(fields: [staffId], references: [id])
+  periodStart DateTime
+  periodEnd  DateTime
+  amountCents Int
+  status     String   @default("PENDING") // PENDING | PAID
+  paidAt     DateTime?
+  note       String?
+  createdAt  DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  type      String   // BOOKING_CONFIRMED | REMINDER | SCHEDULE_CHANGE | JOB_COMPLETED | INVOICE | PAYMENT_REMINDER | STAFF
+  title     String
+  body      String?
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  actorName String   @default("system")
+  action    String
+  source    String   @default("ui") // ui | assistant | system
+  entity    String?
+  entityId  String?
+  payload   String?
+  result    String?
+  ok        Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  key   String @id
+  value String
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  threadId  String
+  role      String   // user | assistant | tool
+  content   String
+  toolCalls String?
+  createdAt DateTime @default(now())
+  @@index([threadId])
+}

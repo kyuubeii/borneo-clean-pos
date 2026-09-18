@@ -1,0 +1,39 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+html, body { height: 100%; }
+body { @apply bg-ink-50 text-ink-800 antialiased; font-feature-settings: "cv02","cv03","cv04","cv11"; }
+
+@layer components {
+  .card { @apply rounded-xl border border-ink-200/70 bg-white shadow-card; }
+  .card-pad { @apply p-4 sm:p-5; }
+  .btn { @apply inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-primary { @apply btn bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800; }
+  .btn-ghost { @apply btn text-ink-600 hover:bg-ink-100 hover:text-ink-900; }
+  .btn-outline { @apply btn border border-ink-200 bg-white text-ink-700 hover:bg-ink-50; }
+  .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700; }
+  .btn-sm { @apply px-2.5 py-1.5 text-xs; }
+  .input { @apply w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm outline-none transition placeholder:text-ink-300 focus:border-brand-400 focus:ring-2 focus:ring-brand-100; }
+  .label { @apply mb-1 block text-xs font-medium text-ink-500; }
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium leading-5 whitespace-nowrap; }
+  .th { @apply px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-ink-400; }
+  .td { @apply px-3 py-2.5 text-sm text-ink-700 align-middle; }
+  .row-link { @apply hover:bg-ink-50/80 transition cursor-pointer; }
+  .section-title { @apply text-sm font-semibold text-ink-900; }
+  .muted { @apply text-ink-400; }
+}
+
+/* Scrollbars stay unobtrusive on the dense operational screens. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { @apply rounded-full bg-ink-200; }
+::-webkit-scrollbar-thumb:hover { @apply bg-ink-300; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media print {
+  .no-print { display: none !important; }
+  body { @apply bg-white; }
+  .card { @apply border-0 shadow-none; }
+  @page { margin: 14mm; }
+}

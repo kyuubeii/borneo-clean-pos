@@ -1,0 +1,74 @@
+"use client";
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useT, LocaleToggle } from "@/components/I18nProvider";
+
+const DEMO = [
+  { email: "owner@borneoclean.my", password: "owner123", role: "Owner" },
+  { email: "admin@borneoclean.my", password: "admin123", role: "Admin" },
+  { email: "aisyah@borneoclean.my", password: "staff123", role: "Cleaner" },
+];
+
+export default function Login() {
+  const t = useT();
+  const router = useRouter();
+  const [email, setEmail] = useState("owner@borneoclean.my");
+  const [password, setPassword] = useState("owner123");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true); setErr("");
+    const r = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
+    setBusy(false);
+    if (!r.ok) return setErr(t("auth.invalid"));
+    router.push("/dashboard");
+    router.refresh();
+  }
+
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-ink-50 via-white to-brand-50 p-4">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-600 text-white shadow-sm">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M3 21h18M6 21V10l6-7 6 7v11M10 21v-5h4v5"/></svg>
+            </div>
+            <div>
+              <p className="text-base font-semibold tracking-tight text-ink-900">{t("app.name")}</p>
+              <p className="text-xs text-ink-400">{t("app.tagline")}</p>
+            </div>
+          </div>
+          <LocaleToggle />
+        </div>
+
+        <form onSubmit={submit} className="card card-pad space-y-3.5">
+          <div>
+            <label className="label">{t("common.email")}</label>
+            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required />
+          </div>
+          <div>
+            <label className="label">{t("auth.password")}</label>
+            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+          </div>
+          {err && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{err}</p>}
+          <button className="btn-primary w-full" disabled={busy}>{busy ? "…" : t("auth.signIn")}</button>
+        </form>
+
+        <div className="mt-4 card card-pad">
+          <p className="mb-2 text-xs font-semibold text-ink-500">{t("auth.demo")}</p>
+          <div className="space-y-1.5">
+            {DEMO.map((d) => (
+              <button key={d.email} onClick={() => { setEmail(d.email); setPassword(d.password); }}
+                className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-left text-xs hover:bg-ink-50">
+                <span className="font-medium text-ink-700">{d.email}</span>
+                <span className="text-ink-400">{d.role}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
