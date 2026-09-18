@@ -304,6 +304,29 @@ defineAction({
 });
 
 defineAction({
+  name: "users.delete",
+  description: "Permanently delete a user account and its login. This cannot be undone. The linked cleaner profile is kept and simply unlinked, and audit history is kept under the person's name. You cannot delete your own account, and you cannot delete the last active owner \u2014 deactivate with users.update instead when you only want to block sign-in.",
+  category: "Admin", roles: ["OWNER"], requiresConfirm: true,
+  input: z.object({ userId: z.string() }),
+  handler: async ({ userId }, ctx) => {
+    if (userId === ctx.user.id) throw new ActionError("You cannot delete your own account. Ask another owner to remove it.");
+    const u = await db.user.findUnique({ where: { id: userId }, include: { staff: true } });
+    if (!u) throw new ActionError("User not found");
+    if (u.role === "OWNER") {
+      const others = await db.user.count({ where: { role: "OWNER", active: true, id: { not: userId } } });
+      if (others === 0) throw new ActionError("This is the last active owner. Promote another user to owner first, otherwise nobody could manage the system.");
+    }
+    // Unlink rather than cascade: the cleaner profile and their job history survive,
+    // and audit rows stay readable through actorName once userId is cleared.
+    if (u.staff) await db.staff.update({ where: { id: u.staff.id }, data: { userId: null } });
+    await db.auditLog.updateMany({ where: { userId }, data: { userId: null } });
+    await db.notification.deleteMany({ where: { userId } });
+    await db.user.delete({ where: { id: userId } });
+    return { deleted: u.email, name: u.name, role: u.role, unlinkedStaff: u.staff?.name ?? null };
+  },
+});
+
+defineAction({
   name: "users.resetPassword",
   description: "Set a new password for a user account.",
   category: "Admin", roles: ["OWNER"], requiresConfirm: true,

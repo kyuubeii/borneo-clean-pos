@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Empty, Modal, Field, callAction, toast } from "@/components/ui";
+import { useCurrentUser } from "@/components/UserProvider";
 import PageHeader from "@/components/PageHeader";
 import { fmtDate } from "@/lib/dates";
 
@@ -13,8 +14,12 @@ const ROLES: Record<string, { label: string; desc: string; tone: string }> = {
 
 export default function Users() {
   const t = useT();
+  const me = useCurrentUser();
   const [open, setOpen] = useState(false);
+  const [doomed, setDoomed] = useState<any>(null);
   const { data, loading, refresh } = useAction<any[]>("users.list", {});
+  // Deleting the last active owner would leave nobody able to manage users.
+  const activeOwners = (data ?? []).filter((u) => u.role === "OWNER" && u.active).length;
 
   async function change(u: any, patch: any) {
     try { await callAction("users.update", { userId: u.id, ...patch }); toast("User updated"); refresh(); }
@@ -47,7 +52,7 @@ export default function Users() {
             <table className="w-full min-w-[620px]">
               <thead className="border-b border-ink-100 bg-ink-50/50">
                 <tr><th className="th">{t("common.name")}</th><th className="th">{t("common.email")}</th>
-                  <th className="th">Role</th><th className="th">Since</th><th className="th text-right">{t("common.status")}</th></tr>
+                  <th className="th">Role</th><th className="th">Since</th><th className="th text-right">{t("common.status")}</th><th className="th" /></tr>
               </thead>
               <tbody className="divide-y divide-ink-50">
                 {data.map((u) => (
@@ -66,6 +71,15 @@ export default function Users() {
                         className={`btn-sm ${u.active ? "btn-ghost text-ink-500" : "btn-outline text-emerald-600"}`}>
                         {u.active ? "Deactivate" : "Reactivate"}</button>
                     </td>
+                    <td className="td text-right">
+                      <button onClick={() => setDoomed(u)} disabled={u.id === me.id || (u.role === "OWNER" && u.active && activeOwners <= 1)}
+                        title={u.id === me.id ? "You cannot delete your own account"
+                          : u.role === "OWNER" && u.active && activeOwners <= 1 ? "The last active owner cannot be deleted"
+                          : "Permanently delete this account"}
+                        className="btn-sm btn-ghost text-rose-600 disabled:cursor-not-allowed disabled:text-ink-300">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -74,6 +88,7 @@ export default function Users() {
       </div>
 
       <NewUser open={open} onClose={() => setOpen(false)} onDone={refresh} />
+      <DeleteUser user={doomed} onClose={() => setDoomed(null)} onDone={refresh} />
     </div>
   );
 }
@@ -116,6 +131,54 @@ function NewUser({ open, onClose, onDone }: any) {
         <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
           <button onClick={go} disabled={busy} className="btn-primary">{t("common.create")}</button></div>
       </div>
+    </Modal>
+  );
+}
+
+/** Permanent account deletion. The email must be typed out to arm the button. */
+function DeleteUser({ user, onClose, onDone }: any) {
+  const t = useT();
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const armed = !!user && typed.trim().toLowerCase() === user.email.toLowerCase();
+
+  function close() { setTyped(""); onClose(); }
+
+  async function go() {
+    setBusy(true);
+    try {
+      const r = await callAction("users.delete", { userId: user.id });
+      toast(r.unlinkedStaff ? `${r.name} deleted \u2014 cleaner profile "${r.unlinkedStaff}" kept` : `${r.name} deleted`);
+      onDone(); close();
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={!!user} onClose={close} title="Delete user permanently">
+      {user && (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+            <p className="text-sm font-medium text-rose-800">{user.name} · {user.email}</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-rose-700">
+              This removes the account and its login for good. It cannot be undone.
+              {user.staffName ? ` The cleaner profile "${user.staffName}" and its job history are kept \u2014 only the login is removed.` : ""}
+              {" Their audit trail stays under their name."}
+            </p>
+          </div>
+          <p className="text-[11px] leading-relaxed text-ink-500">
+            To block sign-in without losing the account, close this and use <strong>Deactivate</strong> instead.
+          </p>
+          <Field label="Type the email address to confirm" hint={user.email}>
+            <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={user.email} autoComplete="off" />
+          </Field>
+          <div className="flex justify-end gap-2">
+            <button onClick={close} className="btn-outline">{t("common.cancel")}</button>
+            <button onClick={go} disabled={!armed || busy}
+              className="btn-sm rounded-lg bg-rose-600 px-3 py-2 font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-ink-200">
+              {busy ? "Deleting\u2026" : "Delete permanently"}</button>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
