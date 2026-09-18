@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
-import { runAction, toolSchemas, getAction } from "@/lib/actions";
+import { runAction, toolSchemas, getAction, resolveAction } from "@/lib/actions";
 import { aiConfig, chatCompletion, getSetting, type ORMessage } from "@/lib/openrouter";
 import { isoDate } from "@/lib/dates";
 
@@ -31,12 +31,18 @@ CURRENT CONTEXT
 - Timezone: local. When the user says "tomorrow at 2pm", resolve it to a concrete ISO datetime yourself before calling a tool.
 
 HOW TO WORK
-- Resolve names to IDs first. If the user says "John", call customers.search, then use the returned id. Never invent an ID.
+- Resolve names to IDs first. If the user says "John", call customers_search, then use the returned id. Never invent an ID.
+- If the user mentions a reference code (BKG-0184, JOB-0137, INV-0042, QT-0001, PAY-0100, EXP-0012, PO-0001), call lookup_byRef with it. Do not page through lists hunting for it.
+- If you are unsure which kind of record is meant, call search_global once rather than trying several list tools.
+- Prefer one precise call over several broad ones. Do not call the same tool repeatedly with different filters hoping to stumble on a record.
 - Prefer taking the action over describing how to take it. You have real write access.
 - Chain tools freely to finish a multi-step request in one turn (e.g. search customer, list services, then create the booking).
 - If a request is genuinely ambiguous (two customers named Tan, no date given), ask one short clarifying question instead of guessing.
 - Some tools require confirmation. When one does, the system returns a confirmation request and the user is shown a confirm/cancel prompt. Do not try to bypass it and do not re-call the tool yourself — just wait for the outcome.
 - Follow-up references are relative to what you last showed. "the second one" means the second item in your previous list — use the id from that list.
+
+TOOL NAMES
+- Tools are named with underscores (customers_search, bookings_create, lookup_byRef). Use exactly the names you are given.
 
 STYLE
 - Be brief and concrete, like a good operations manager. Lead with the answer.
@@ -114,19 +120,21 @@ export async function POST(req: NextRequest) {
       for (const call of reply.tool_calls) {
         let args: unknown = {};
         try { args = JSON.parse(call.function.arguments || "{}"); } catch {}
-        const res = await runAction(call.function.name, args, { user, source: "assistant" });
+        // The model sees "customers_search"; the registry knows "customers.search".
+        const def = resolveAction(call.function.name);
+        const actionName = def?.name ?? call.function.name;
+        const res = await runAction(actionName, args, { user, source: "assistant" });
 
         // Risky action — hand it back to the user to confirm, and pause the loop here.
         // Any tool calls after this one in the same reply keep their placeholder result.
         // History stays valid (that is what the placeholders are for); the model simply
         // sees "awaiting confirmation" for calls that never ran, which is accurate.
         if (!res.ok && (res as any).needsConfirm) {
-          const def = getAction(call.function.name);
           return NextResponse.json({ ok: true, threadId: thread, message: reply.content ?? "",
             events,
             confirm: {
-              action: call.function.name, input: (res as any).input, toolCallId: call.id,
-              title: def?.description ?? call.function.name, category: def?.category,
+              action: actionName, input: (res as any).input, toolCallId: call.id,
+              title: def?.description ?? actionName, category: def?.category,
             } });
         }
 
@@ -135,7 +143,7 @@ export async function POST(req: NextRequest) {
         messages.push({ role: "tool", content: trimmed, tool_call_id: call.id });
         await db.chatMessage.updateMany({ where: { threadId: thread, toolCalls: call.id, content: PENDING },
           data: { content: trimmed } });
-        events.push({ type: "action", name: call.function.name, ok: res.ok, readOnly: getAction(call.function.name)?.readOnly ?? false });
+        events.push({ type: "action", name: actionName, ok: res.ok, readOnly: def?.readOnly ?? false });
       }
     }
     return NextResponse.json({ ok: true, threadId: thread, events,

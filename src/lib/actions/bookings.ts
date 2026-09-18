@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "../db";
+import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { nextRef } from "../ref";
 import { startOfDay, endOfDay, addDays, addMonths } from "../dates";
@@ -40,7 +41,7 @@ defineAction({
   input: z.object({
     from: z.string().optional().describe("ISO date, inclusive"), to: z.string().optional(),
     status: z.enum(["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"]).optional(),
-    customerId: z.string().optional(), limit: z.number().int().max(100).default(50),
+    customerId: optionalId(), limit: z.number().int().max(100).default(50),
   }),
   handler: async ({ from, to, status, customerId, limit }) => db.booking.findMany({
     where: {
@@ -71,7 +72,7 @@ defineAction({
   category: "Bookings", roles: ["OWNER", "ADMIN"],
   input: z.object({
     customerId: z.string(),
-    addressId: z.string().optional(),
+    addressId: optionalId(),
     startAt: z.string().describe("ISO datetime for the first visit"),
     serviceIds: z.array(z.string()).min(1).describe("Service catalogue IDs; look them up with services.list"),
     notes: z.string().optional().describe("Instructions visible to the customer and cleaner"),

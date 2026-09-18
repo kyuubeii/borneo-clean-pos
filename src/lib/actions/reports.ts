@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "../db";
+import { optionalId } from "../schema";
 import { defineAction } from "../registry";
 import { startOfDay, endOfDay, startOfMonth, endOfMonth, addDays, isoDate } from "../dates";
 import { invoiceTotals } from "./finance";
@@ -186,7 +187,7 @@ defineAction({
   name: "reports.myDay",
   description: "A cleaner's own day: their jobs for a date, their open check-in, hours worked this week and pay earned so far.",
   category: "Reports", roles: ["OWNER", "ADMIN", "STAFF"], readOnly: true,
-  input: z.object({ date: z.string().optional().describe("ISO date; defaults to today"), staffId: z.string().optional() }),
+  input: z.object({ date: z.string().optional().describe("ISO date; defaults to today"), staffId: optionalId() }),
   handler: async ({ date, staffId }, ctx) => {
     const id = ctx.user.role === "STAFF" ? ctx.user.staffId : (staffId ?? ctx.user.staffId);
     if (!id) throw new Error("No cleaner profile is linked to this account");

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "../db";
+import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { startOfDay, endOfDay } from "../dates";
 import { notify } from "../notify";
@@ -18,7 +19,7 @@ defineAction({
   input: z.object({
     from: z.string().optional().describe("ISO date, inclusive"), to: z.string().optional(),
     status: z.enum(["SCHEDULED", "EN_ROUTE", "IN_PROGRESS", "COMPLETED", "CANCELLED"]).optional(),
-    staffId: z.string().optional(), customerId: z.string().optional(),
+    staffId: optionalId(), customerId: optionalId(),
     limit: z.number().int().max(100).default(50),
   }),
   handler: async ({ from, to, status, staffId, customerId, limit }, ctx) => {

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "../db";
+import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { nextRef } from "../ref";
 import { totals } from "../money";
@@ -28,7 +29,7 @@ defineAction({
   name: "quotes.list",
   description: "List quotations, optionally filtered by status or customer.",
   category: "Quotes", roles: ["OWNER", "ADMIN"], readOnly: true,
-  input: z.object({ status: z.enum(["DRAFT","SENT","ACCEPTED","DECLINED","EXPIRED"]).optional(), customerId: z.string().optional(), limit: z.number().int().max(100).default(50) }),
+  input: z.object({ status: z.enum(["DRAFT","SENT","ACCEPTED","DECLINED","EXPIRED"]).optional(), customerId: optionalId(), limit: z.number().int().max(100).default(50) }),
   handler: async ({ status, customerId, limit }) => {
     const rows = await db.quote.findMany({ where: { ...(status ? { status } : {}), ...(customerId ? { customerId } : {}) },
       orderBy: { issuedAt: "desc" }, take: limit, include: { customer: true, items: true } });
@@ -44,7 +45,7 @@ defineAction({
   input: z.object({
     customerId: z.string(),
     items: z.array(z.object({ name: z.string(), qty: z.number().int().min(1).default(1),
-      priceCents: z.number().int().describe("Unit price in cents"), serviceId: z.string().optional() })).min(1),
+      priceCents: z.number().int().describe("Unit price in cents"), serviceId: optionalId() })).min(1),
     discountCents: z.number().int().min(0).default(0), taxRateBp: z.number().int().min(0).default(0).describe("Tax rate in basis points; 600 is 6%"),
     validDays: z.number().int().default(30), notes: z.string().optional(),
   }),
@@ -102,7 +103,7 @@ defineAction({
   input: z.object({
     status: z.enum(["DRAFT","SENT","PARTIAL","PAID","OVERDUE","VOID"]).optional(),
     unpaidOnly: z.boolean().default(false).describe("Only invoices with a balance still outstanding"),
-    customerId: z.string().optional(), from: z.string().optional(), to: z.string().optional(),
+    customerId: optionalId(), from: z.string().optional(), to: z.string().optional(),
     limit: z.number().int().max(200).default(100),
   }),
   handler: async ({ status, unpaidOnly, customerId, from, to, limit }) => {
@@ -235,7 +236,7 @@ defineAction({
   name: "payments.list",
   description: "List recorded payments and refunds over a period.",
   category: "Payments", roles: ["OWNER", "ADMIN"], readOnly: true,
-  input: z.object({ from: z.string().optional(), to: z.string().optional(), customerId: z.string().optional(), limit: z.number().int().max(200).default(100) }),
+  input: z.object({ from: z.string().optional(), to: z.string().optional(), customerId: optionalId(), limit: z.number().int().max(200).default(100) }),
   handler: async ({ from, to, customerId, limit }) => {
     const rows = await db.payment.findMany({
       where: { ...(customerId ? { customerId } : {}),

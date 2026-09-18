@@ -59,7 +59,9 @@ From that single declaration the system derives, with no duplication:
 means writing one `defineAction`. The assistant can use it immediately — no chatbot
 code changes, no prompt edits, no hand-written tool schemas to keep in sync.
 
-Currently **72 actions** across 15 categories. An Owner sees all 72; a Cleaner sees 19.
+Currently **94 actions** across 16 categories, covering every capability the UI has plus
+lookup, editing and deletion paths the UI does not expose. An Owner sees all 94, an Admin
+87, a Cleaner 23.
 
 Scoping lives in the handler, not the page, so it holds for the UI and the assistant
 alike: `jobs.list` and `expenses.list` silently narrow to the caller's own records when
@@ -71,6 +73,10 @@ the caller is a Cleaner, and `jobs.get` refuses a job they are not assigned to.
 
 Open it from the sidebar (or the **AI** button on mobile). It runs a bounded
 tool-calling loop against OpenRouter over the registry.
+
+**Model compatibility.** Tool names are exposed with underscores (`customers_search`),
+because OpenAI-family models enforce `^[a-zA-Z0-9_-]+$` on function names and reject the
+entire request if any name contains a dot. The registry maps them back automatically.
 
 **Setup:** add an OpenRouter key under **Settings → AI Assistant** (stored server-side,
 never returned to the browser), or set `OPENROUTER_API_KEY` in `.env`. The model is a
@@ -107,6 +113,9 @@ visible under **Activity log**.
 - **Money is integer cents everywhere** (`amountCents`, `priceCents`). Currency is MYR.
   Floats are never used for money; `src/lib/money.ts` holds the helpers. Tax is in
   basis points (600 = 6%).
+- **Optional IDs tolerate blanks.** Models routinely emit `""` or `"/"` for an optional
+  field they have no value for; `optionalId()` in `src/lib/schema.ts` coerces those to
+  `undefined` so they never reach the database as a foreign key matching nothing.
 - **Recurring bookings** are materialised as individual child bookings with a `parentId`,
   generated up to 6 months out. Rescheduling one visit moves only that visit; cancelling
   offers an explicit "whole series" option.

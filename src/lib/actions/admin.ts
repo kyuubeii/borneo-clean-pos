@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "../db";
+import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { hashPassword } from "../auth";
 
@@ -48,7 +49,7 @@ defineAction({
   description: "Create a new user account with a role. Roles: OWNER (everything), ADMIN (operations and money), STAFF (own jobs only).",
   category: "Admin", roles: ["OWNER"], requiresConfirm: true,
   input: z.object({ name: z.string().min(1), email: z.string().min(3), password: z.string().min(6),
-    role: z.enum(["OWNER", "ADMIN", "STAFF"]).default("STAFF"), staffId: z.string().optional() }),
+    role: z.enum(["OWNER", "ADMIN", "STAFF"]).default("STAFF"), staffId: optionalId() }),
   handler: async (i) => {
     const email = i.email.toLowerCase().trim();
     if (await db.user.findUnique({ where: { email } })) throw new ActionError("That email is already in use");

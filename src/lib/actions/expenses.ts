@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "../db";
+import { optionalId, optionalText } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { nextRef } from "../ref";
 import { startOfDay, endOfDay } from "../dates";
@@ -8,8 +9,8 @@ defineAction({
   name: "expenses.list",
   description: "List business expenses over a period, optionally filtered by category, job or staff member.",
   category: "Expenses", roles: ["OWNER", "ADMIN", "STAFF"], readOnly: true,
-  input: z.object({ from: z.string().optional(), to: z.string().optional(), categoryId: z.string().optional(),
-    jobId: z.string().optional(), staffId: z.string().optional(), reimbursableOnly: z.boolean().default(false),
+  input: z.object({ from: z.string().optional(), to: z.string().optional(), categoryId: optionalId(),
+    jobId: optionalId(), staffId: optionalId(), reimbursableOnly: z.boolean().default(false),
     limit: z.number().int().max(200).default(100) }),
   handler: async ({ from, to, categoryId, jobId, staffId, reimbursableOnly, limit }, ctx) => {
     // A cleaner only ever sees expenses they themselves submitted.
@@ -33,11 +34,11 @@ defineAction({
   category: "Expenses", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({
     amountCents: z.number().int().min(1).describe("Amount in cents, e.g. RM 120 is 12000"),
-    categoryName: z.string().optional().describe("Category name; created if it does not exist, e.g. Fuel, Supplies"),
-    jobId: z.string().optional(), staffId: z.string().optional(),
+    categoryName: optionalText().describe("Category name; created if it does not exist, e.g. Fuel, Supplies"),
+    jobId: optionalId(), staffId: optionalId(),
     vendor: z.string().optional(), note: z.string().optional(),
     spentAt: z.string().optional().describe("ISO date; defaults to now"),
-    reimbursable: z.boolean().default(false), receiptUrl: z.string().optional(),
+    reimbursable: z.boolean().default(false), receiptUrl: optionalText(),
   }),
   handler: async (i) => {
     let categoryId: string | undefined;
@@ -84,7 +85,7 @@ defineAction({
   name: "payroll.calculate",
   description: "Calculate what each cleaner has earned over a period, from tracked time and their pay setup. Does not create a payout.",
   category: "Payroll", roles: ["OWNER", "ADMIN"], readOnly: true,
-  input: z.object({ from: z.string().describe("ISO date"), to: z.string().describe("ISO date"), staffId: z.string().optional() }),
+  input: z.object({ from: z.string().describe("ISO date"), to: z.string().describe("ISO date"), staffId: optionalId() }),
   handler: async ({ from, to, staffId }) => {
     const gte = startOfDay(new Date(from)), lte = endOfDay(new Date(to));
     const staff = await db.staff.findMany({ where: { active: true, ...(staffId ? { id: staffId } : {}) } });
@@ -132,7 +133,7 @@ defineAction({
   name: "payroll.list",
   description: "List payouts, including which are still outstanding.",
   category: "Payroll", roles: ["OWNER", "ADMIN"], readOnly: true,
-  input: z.object({ staffId: z.string().optional(), status: z.enum(["PENDING", "PAID"]).optional() }),
+  input: z.object({ staffId: optionalId(), status: z.enum(["PENDING", "PAID"]).optional() }),
   handler: async ({ staffId, status }) => {
     const rows = await db.payout.findMany({ where: { ...(staffId ? { staffId } : {}), ...(status ? { status } : {}) },
       orderBy: { periodEnd: "desc" }, include: { staff: true } });

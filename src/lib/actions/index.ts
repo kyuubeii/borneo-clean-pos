@@ -8,4 +8,6 @@ import "./finance";
 import "./expenses";
 import "./reports";
 import "./admin";
-export { allActions, actionsFor, runAction, toolSchemas, getAction } from "../registry";
+import "./lookup";
+import "./edits";
+export { allActions, actionsFor, runAction, toolSchemas, getAction, resolveAction, toToolName } from "../registry";

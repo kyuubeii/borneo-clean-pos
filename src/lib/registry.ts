@@ -23,6 +23,12 @@ export type Action<I extends z.ZodTypeAny = z.ZodTypeAny> = {
 const registry = new Map<string, Action<any>>();
 
 export function defineAction<I extends z.ZodTypeAny>(a: Action<I>): Action<I> {
+  const tool = toToolName(a.name);
+  for (const other of registry.values()) {
+    if (other.name !== a.name && toToolName(other.name) === tool) {
+      throw new Error(`Action "${a.name}" and "${other.name}" both map to tool name "${tool}"`);
+    }
+  }
   // Overwrite on re-registration so dev hot-reload does not throw.
   registry.set(a.name, a);
   return a;
@@ -30,6 +36,21 @@ export function defineAction<I extends z.ZodTypeAny>(a: Action<I>): Action<I> {
 
 export function getAction(name: string) { return registry.get(name); }
 export function allActions() { return [...registry.values()]; }
+
+/**
+ * Tool names exposed to the model. OpenAI-family models enforce
+ * `^[a-zA-Z0-9_-]+$` on function names and reject the whole request if any name
+ * contains a dot, so "customers.search" goes out as "customers_search".
+ * Anthropic models accept either; this form is safe everywhere.
+ */
+export const toToolName = (actionName: string) => actionName.replace(/\./g, "_");
+
+/** Resolve whatever the model called back to a registered action. */
+export function resolveAction(toolName: string) {
+  const direct = registry.get(toolName);
+  if (direct) return direct;
+  return allActions().find((a) => toToolName(a.name) === toolName);
+}
 
 /** Actions this user may invoke — the assistant only ever sees these. */
 export function actionsFor(user: SessionUser) {
@@ -87,11 +108,26 @@ export async function runAction(
     }
     return { ok: true, data };
   } catch (e: any) {
-    const error = e?.message ?? "Unexpected error";
+    const error = friendlyError(e);
     await audit({ userId: ctx.user.id, actorName: ctx.user.name, action: name, source: ctx.source,
       payload: parsed.data, result: error, ok: false });
     return { ok: false, error, code: e?.code ?? "HANDLER_ERROR" };
   }
+}
+
+/**
+ * Prisma's errors are opaque to a model ("Foreign key constraint violated"),
+ * which leads it to retry the same call. Translate them into something it can act on.
+ */
+function friendlyError(e: any): string {
+  const code = e?.code;
+  if (code === "P2003") return "One of the IDs you passed does not exist. Look the record up first and use the exact id returned; omit optional IDs you do not have.";
+  if (code === "P2025") return "That record does not exist. Check the id, or search for it first.";
+  if (code === "P2002") {
+    const t = e?.meta?.target;
+    return `A record with that ${Array.isArray(t) ? t.join(", ") : t ?? "value"} already exists.`;
+  }
+  return e?.message ?? "Unexpected error";
 }
 
 /** Derives the OpenRouter/OpenAI tools array straight from the registry. */
@@ -102,7 +138,7 @@ export function toolSchemas(user: SessionUser) {
     return {
       type: "function" as const,
       function: {
-        name: a.name,
+        name: toToolName(a.name),
         description: a.requiresConfirm ? `${a.description} (Requires user confirmation before executing.)` : a.description,
         parameters: { type: "object", properties: schema.properties ?? {}, required: schema.required ?? [] },
       },

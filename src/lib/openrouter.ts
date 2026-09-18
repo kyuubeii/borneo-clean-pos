@@ -42,12 +42,26 @@ export async function chatCompletion(opts: {
       temperature: opts.temperature ?? 0.2,
     }),
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`OpenRouter ${res.status}: ${text.slice(0, 400)}`);
+  // Read as text first: OpenRouter pads long requests with whitespace keep-alives,
+  // and returns errors as a 200 with an { error } body rather than a bad status.
+  const raw = await res.text();
+  let json: any;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    throw new Error(`OpenRouter returned a non-JSON response (HTTP ${res.status}): ${raw.trim().slice(0, 300) || "<empty body>"}`);
   }
-  const json = await res.json();
+  if (!res.ok || json.error) {
+    const e = json.error;
+    const msg = typeof e === "string" ? e : e?.message ?? raw.slice(0, 300);
+    const code = e?.code ? ` [${e.code}]` : "";
+    // Surface provider-side detail too; it is usually the part that explains the failure.
+    const meta = e?.metadata ? ` ${JSON.stringify(e.metadata).slice(0, 300)}` : "";
+    throw new Error(`OpenRouter ${res.status}${code}: ${msg}${meta}`);
+  }
   const choice = json.choices?.[0];
-  if (!choice) throw new Error("No response from the model");
+  if (!choice) {
+    throw new Error(`OpenRouter returned no choices. Body: ${JSON.stringify(json).slice(0, 400)}`);
+  }
   return choice.message as ORMessage;
 }
