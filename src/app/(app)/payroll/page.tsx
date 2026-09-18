@@ -3,14 +3,13 @@ import { useState } from "react";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Money, Empty, Badge, callAction, toast, Stat } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
-import { fmtDate, addDays, startOfMonth, endOfMonth } from "@/lib/dates";
+import { fmtDate, addDays, startOfMonth, endOfMonth, isoDate } from "@/lib/dates";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function Payroll() {
   const t = useT();
-  const [from, setFrom] = useState(iso(startOfMonth(new Date())));
-  const [to, setTo] = useState(iso(endOfMonth(new Date())));
+  const [from, setFrom] = useState(isoDate(startOfMonth(new Date())));
+  const [to, setTo] = useState(isoDate(endOfMonth(new Date())));
   const calc = useAction<any>("payroll.calculate", { from, to });
   const payouts = useAction<any[]>("payroll.list", {});
   const [busy, setBusy] = useState("");

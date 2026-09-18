@@ -3,8 +3,20 @@ import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { runAction, toolSchemas, getAction } from "@/lib/actions";
 import { aiConfig, chatCompletion, getSetting, type ORMessage } from "@/lib/openrouter";
+import { isoDate } from "@/lib/dates";
 
 export const maxDuration = 60;
+
+const PENDING = JSON.stringify({ ok: false, error: "Awaiting user confirmation." });
+
+/** Fill in a placeholder tool message, in the DB and in the in-flight message list. */
+async function resolveToolMessage(threadId: string, toolCallId: string | undefined, payload: string, messages: ORMessage[]) {
+  if (!toolCallId) return;
+  await db.chatMessage.updateMany({ where: { threadId, toolCalls: toolCallId }, data: { content: payload } });
+  const existing = messages.find((m) => m.role === "tool" && m.tool_call_id === toolCallId);
+  if (existing) existing.content = payload;
+  else messages.push({ role: "tool", content: payload, tool_call_id: toolCallId });
+}
 
 function systemPrompt(user: { name: string; role: string }, business: string) {
   const now = new Date();
@@ -14,7 +26,7 @@ You are talking to ${user.name} (role: ${user.role}). You operate the applicatio
 
 CURRENT CONTEXT
 - Now: ${now.toString()}
-- Today's date: ${now.toISOString().slice(0, 10)} (${now.toLocaleDateString("en-MY", { weekday: "long" })})
+- Today's date: ${isoDate(now)} (${now.toLocaleDateString("en-MY", { weekday: "long" })})
 - Currency: Malaysian Ringgit (RM). All monetary values in tool inputs and outputs are INTEGER CENTS. RM 120 is 12000. Always show money to the user as "RM 120.00", never as cents.
 - Timezone: local. When the user says "tomorrow at 2pm", resolve it to a concrete ISO datetime yourself before calling a tool.
 
@@ -62,9 +74,12 @@ export async function POST(req: NextRequest) {
   if (confirm?.action) {
     const res = await runAction(confirm.action, confirm.input, { user, source: "assistant" }, { confirmed: true });
     const payload = JSON.stringify(res.ok ? { ok: true, result: (res as any).data } : { ok: false, error: (res as any).error });
-    await db.chatMessage.create({ data: { threadId: thread, role: "tool", content: payload, toolCalls: confirm.toolCallId ?? null } });
-    messages.push({ role: "tool", content: payload, tool_call_id: confirm.toolCallId ?? "confirmed" });
+    await resolveToolMessage(thread, confirm.toolCallId, payload, messages);
     events.push({ type: "action", name: confirm.action, ok: res.ok, result: res.ok ? (res as any).data : (res as any).error });
+  } else if (confirm?.cancelled && confirm?.toolCallId) {
+    // The user declined. Close the open tool call so the thread stays valid.
+    const payload = JSON.stringify({ ok: false, error: "The user declined this action. Nothing was changed." });
+    await resolveToolMessage(thread, confirm.toolCallId, payload, messages);
   } else if (message) {
     await db.chatMessage.create({ data: { threadId: thread, role: "user", content: message } });
     messages.push({ role: "user", content: message });
@@ -88,6 +103,14 @@ export async function POST(req: NextRequest) {
         threadId: thread, role: "assistant", content: reply.content ?? "",
         toolCalls: JSON.stringify(reply.tool_calls) } });
 
+      // Every tool_call must have a matching tool message or OpenRouter rejects the
+      // next turn. Write placeholders now and resolve them as each call completes,
+      // so the thread stays valid however this loop exits (gate, error, cancel).
+      for (const call of reply.tool_calls) {
+        await db.chatMessage.create({ data: { threadId: thread, role: "tool",
+          content: PENDING, toolCalls: call.id } });
+      }
+
       for (const call of reply.tool_calls) {
         let args: unknown = {};
         try { args = JSON.parse(call.function.arguments || "{}"); } catch {}
@@ -107,7 +130,8 @@ export async function POST(req: NextRequest) {
         const payload = JSON.stringify(res.ok ? { ok: true, result: (res as any).data } : { ok: false, error: (res as any).error });
         const trimmed = payload.length > 12000 ? payload.slice(0, 12000) + '…","truncated":true}' : payload;
         messages.push({ role: "tool", content: trimmed, tool_call_id: call.id });
-        await db.chatMessage.create({ data: { threadId: thread, role: "tool", content: trimmed, toolCalls: call.id } });
+        await db.chatMessage.updateMany({ where: { threadId: thread, toolCalls: call.id, content: PENDING },
+          data: { content: trimmed } });
         events.push({ type: "action", name: call.function.name, ok: res.ok, readOnly: getAction(call.function.name)?.readOnly ?? false });
       }
     }

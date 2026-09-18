@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useT } from "./I18nProvider";
+import { refreshAll } from "./ui";
 
 type Msg = { role: "user" | "assistant" | "system"; content: string; actions?: { name: string; ok: boolean }[] };
 type Confirm = { action: string; input: any; toolCallId: string; title: string; category?: string };
@@ -58,7 +59,7 @@ export default function Assistant({ open, onClose }: { open: boolean; onClose: (
       if (j.message || actions.length) setMsgs((m) => [...m, { role: "assistant", content: j.message || "", actions }]);
       if (j.confirm) setConfirm(j.confirm);
       // A write may have changed what the page behind the drawer is showing.
-      if (actions.some((a: any) => a.ok)) router.refresh();
+      if (actions.some((a: any) => a.ok)) { router.refresh(); refreshAll(); }
     } catch (e: any) {
       setMsgs((m) => [...m, { role: "system", content: e.message }]);
     } finally { setBusy(false); }
@@ -151,7 +152,14 @@ export default function Assistant({ open, onClose }: { open: boolean; onClose: (
 {JSON.stringify(confirm.input, null, 2)}</pre>
               <div className="mt-2.5 flex gap-2">
                 <button onClick={() => post({ confirm })} className="btn-primary btn-sm flex-1">{t("ai.confirmRun")}</button>
-                <button onClick={() => { setConfirm(null); setMsgs((m) => [...m, { role: "system", content: "Cancelled — nothing was changed." }]); }}
+                <button onClick={() => {
+                    // Tell the server too, so the open tool call is closed and the thread stays usable.
+                    const c = confirm;
+                    setConfirm(null);
+                    setMsgs((m) => [...m, { role: "system", content: "Cancelled — nothing was changed." }]);
+                    fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ threadId: thread, confirm: { cancelled: true, toolCallId: c.toolCallId } }) }).catch(() => {});
+                  }}
                   className="btn-outline btn-sm flex-1">{t("ai.confirmCancel")}</button>
               </div>
             </div>

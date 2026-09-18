@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { db } from "../db";
 import { defineAction } from "../registry";
-import { startOfDay, endOfDay, startOfMonth, endOfMonth, addDays } from "../dates";
+import { startOfDay, endOfDay, startOfMonth, endOfMonth, addDays, isoDate } from "../dates";
 import { invoiceTotals } from "./finance";
 
 function range(from?: string, to?: string) {
@@ -83,9 +83,8 @@ defineAction({
   handler: async ({ from, to, granularity }) => {
     const { gte, lte } = range(from, to);
     const pays = await db.payment.findMany({ where: { paidAt: { gte, lte } }, orderBy: { paidAt: "asc" } });
-    const key = (d: Date) => granularity === "day"
-      ? d.toISOString().slice(0, 10)
-      : d.toISOString().slice(0, 7);
+    // Bucket by local calendar day/month so periods line up with the range shown.
+    const key = (d: Date) => granularity === "day" ? isoDate(d) : isoDate(d).slice(0, 7);
     const map = new Map<string, number>();
     if (granularity === "day") for (let d = new Date(gte); d <= lte; d = addDays(d, 1)) map.set(key(d), 0);
     for (const p of pays) map.set(key(p.paidAt), (map.get(key(p.paidAt)) ?? 0) + (p.isRefund ? -p.amountCents : p.amountCents));
@@ -179,6 +178,41 @@ defineAction({
         overdueInvoices: outstanding.length,
         overdueAmountCents: outstanding.reduce((a, i) => a + invoiceTotals(i).balance, 0),
       },
+    };
+  },
+});
+
+defineAction({
+  name: "reports.myDay",
+  description: "A cleaner's own day: their jobs for a date, their open check-in, hours worked this week and pay earned so far.",
+  category: "Reports", roles: ["OWNER", "ADMIN", "STAFF"], readOnly: true,
+  input: z.object({ date: z.string().optional().describe("ISO date; defaults to today"), staffId: z.string().optional() }),
+  handler: async ({ date, staffId }, ctx) => {
+    const id = ctx.user.role === "STAFF" ? ctx.user.staffId : (staffId ?? ctx.user.staffId);
+    if (!id) throw new Error("No cleaner profile is linked to this account");
+    const d = date ? new Date(date) : new Date();
+    const gte = startOfDay(d), lte = endOfDay(d);
+    const jobs = await db.job.findMany({
+      where: { assignments: { some: { staffId: id } }, scheduledAt: { gte, lte } },
+      orderBy: { scheduledAt: "asc" }, include: { customer: true, address: true, checklist: true },
+    });
+    const weekStart = startOfDay(addDays(d, -6));
+    const entries = await db.timeEntry.findMany({ where: { staffId: id, startAt: { gte: weekStart, lte } } });
+    const minutes = entries.reduce((a, e) => a + (e.endAt ? (e.endAt.getTime() - e.startAt.getTime()) / 60000 : 0), 0);
+    const open = entries.find((e) => !e.endAt);
+    const staff = await db.staff.findUnique({ where: { id } });
+    const earned = staff?.payType === "HOURLY" ? Math.round((minutes / 60) * staff.payRate) : 0;
+    const upcoming = await db.job.count({ where: { assignments: { some: { staffId: id } }, scheduledAt: { gt: lte }, status: { notIn: ["CANCELLED", "COMPLETED"] } } });
+    return {
+      date: gte, staffName: staff?.name,
+      jobs: jobs.map((j) => ({ id: j.id, ref: j.ref, time: j.scheduledAt, status: j.status,
+        customer: j.customer.name, durationMin: j.durationMin,
+        address: j.address ? [j.address.line1, j.address.city].filter(Boolean).join(", ") : null,
+        checklistDone: j.checklist.filter((c) => c.done).length, checklistTotal: j.checklist.length })),
+      jobsToday: jobs.length, completedToday: jobs.filter((j) => j.status === "COMPLETED").length,
+      upcomingJobs: upcoming,
+      hoursThisWeek: +(minutes / 60).toFixed(1), earnedThisWeekCents: earned,
+      checkedInToJobId: open?.jobId ?? null,
     };
   },
 });

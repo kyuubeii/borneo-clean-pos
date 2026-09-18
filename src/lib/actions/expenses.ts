@@ -7,11 +7,13 @@ import { startOfDay, endOfDay } from "../dates";
 defineAction({
   name: "expenses.list",
   description: "List business expenses over a period, optionally filtered by category, job or staff member.",
-  category: "Expenses", roles: ["OWNER", "ADMIN"], readOnly: true,
+  category: "Expenses", roles: ["OWNER", "ADMIN", "STAFF"], readOnly: true,
   input: z.object({ from: z.string().optional(), to: z.string().optional(), categoryId: z.string().optional(),
     jobId: z.string().optional(), staffId: z.string().optional(), reimbursableOnly: z.boolean().default(false),
     limit: z.number().int().max(200).default(100) }),
-  handler: async ({ from, to, categoryId, jobId, staffId, reimbursableOnly, limit }) => {
+  handler: async ({ from, to, categoryId, jobId, staffId, reimbursableOnly, limit }, ctx) => {
+    // A cleaner only ever sees expenses they themselves submitted.
+    if (ctx.user.role === "STAFF") staffId = ctx.user.staffId ?? "__none__";
     const rows = await db.expense.findMany({
       where: { ...(categoryId ? { categoryId } : {}), ...(jobId ? { jobId } : {}), ...(staffId ? { staffId } : {}),
         ...(reimbursableOnly ? { reimbursable: true, reimbursed: false } : {}),

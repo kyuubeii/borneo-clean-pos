@@ -4,15 +4,14 @@ import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Badge, Money, Empty, callAction, toast, Field } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
-import { fmtDateTime } from "@/lib/dates";
+import { fmtDateTime, isoDate } from "@/lib/dates";
 
 const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function StaffDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const t = useT();
-  const from = iso(new Date(Date.now() - 90 * 86400000)), to = iso(new Date());
+  const from = isoDate(new Date(Date.now() - 90 * 86400000)), to = isoDate(new Date());
   const list = useAction<any[]>("staff.list", { includeInactive: true });
   const hist = useAction<any>("staff.workHistory", { staffId: id, from, to });
   const pay = useAction<any>("payroll.calculate", { from, to, staffId: id });

@@ -14,3 +14,12 @@ export const toInput = (d: Date) => {
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 };
 export const minsToLabel = (m: number) => m >= 60 ? `${Math.floor(m/60)}h${m%60 ? ` ${m%60}m` : ""}` : `${m}m`;
+
+/**
+ * Local-calendar YYYY-MM-DD. Never use toISOString().slice(0,10) for this:
+ * it converts to UTC first, which shifts period boundaries by a day.
+ */
+export const isoDate = (d: Date) => {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};

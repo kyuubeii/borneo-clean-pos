@@ -6,7 +6,7 @@ import { useT } from "@/components/I18nProvider";
 import { useAction, Badge, Money, Empty } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import BookingForm from "@/components/BookingForm";
-import { fmtDateTime, minsToLabel } from "@/lib/dates";
+import { fmtDateTime, minsToLabel, isoDate } from "@/lib/dates";
 
 function BookingsInner() {
   const t = useT();
@@ -17,7 +17,7 @@ function BookingsInner() {
 
   const { data, loading, refresh } = useAction<any[]>("bookings.list", {
     ...(status ? { status } : {}),
-    ...(scope === "upcoming" ? { from: new Date().toISOString().slice(0, 10) } : {}),
+    ...(scope === "upcoming" ? { from: isoDate(new Date()) } : {}),
     limit: 100,
   });
 

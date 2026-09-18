@@ -3,19 +3,27 @@ import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Stat, Badge, Money, Empty } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
-import { fmtTime, fmtDate, startOfMonth, endOfMonth } from "@/lib/dates";
+import StaffDashboard from "@/components/StaffDashboard";
+import { useIsStaff } from "@/components/UserProvider";
+import { fmtTime, fmtDate, startOfMonth, endOfMonth, isoDate } from "@/lib/dates";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function Dashboard() {
+  const isStaff = useIsStaff();
+  // Cleaners get their own day; the business dashboard needs owner/admin data.
+  if (isStaff) return <StaffDashboard />;
+  return <OwnerDashboard />;
+}
+
+function OwnerDashboard() {
   const t = useT();
   const today = new Date();
-  const monthFrom = iso(startOfMonth(today)), monthTo = iso(endOfMonth(today));
+  const monthFrom = isoDate(startOfMonth(today)), monthTo = isoDate(endOfMonth(today));
 
   const brief = useAction<any>("reports.dailyBriefing", {});
   const summary = useAction<any>("reports.summary", { from: monthFrom, to: monthTo });
   const outstanding = useAction<any>("payments.outstanding", {});
-  const upcoming = useAction<any[]>("bookings.list", { from: iso(new Date(Date.now() + 86400000)), limit: 6, status: "CONFIRMED" });
+  const upcoming = useAction<any[]>("bookings.list", { from: isoDate(new Date(Date.now() + 86400000)), limit: 6, status: "CONFIRMED" });
   const activity = useAction<any[]>("audit.list", { limit: 8 });
   const trend = useAction<any[]>("reports.revenueTrend", { from: monthFrom, to: monthTo, granularity: "day" });
 

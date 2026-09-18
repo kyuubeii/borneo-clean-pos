@@ -27,7 +27,8 @@ export async function aiConfig() {
 export async function chatCompletion(opts: {
   messages: ORMessage[]; tools?: unknown[]; model: string; apiKey: string; temperature?: number;
 }) {
-  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const base = process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
+  const res = await fetch(`${base}/chat/completions`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${opts.apiKey}`,

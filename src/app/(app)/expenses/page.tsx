@@ -3,18 +3,21 @@ import { useState, useRef } from "react";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Money, Empty, Modal, Field, callAction, toast, Stat } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
-import { fmtDate, addDays } from "@/lib/dates";
+import { useIsStaff } from "@/components/UserProvider";
+import { fmtDate, addDays, isoDate } from "@/lib/dates";
 import { toCents } from "@/lib/money";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function Expenses() {
   const t = useT();
   const [days, setDays] = useState(30);
   const [open, setOpen] = useState(false);
-  const from = iso(addDays(new Date(), -days));
+  const from = isoDate(addDays(new Date(), -days));
+  const isStaff = useIsStaff();
   const { data, loading, refresh } = useAction<any[]>("expenses.list", { from, limit: 200 });
-  const breakdown = useAction<any[]>("reports.expenseBreakdown", { from, to: iso(new Date()) });
+  // reports.expenseBreakdown is owner/admin only, so cleaners never request it.
+  const breakdown = useAction<any[]>(isStaff ? "expenses.categories" : "reports.expenseBreakdown",
+    isStaff ? {} : { from, to: isoDate(new Date()) });
 
   const total = (data ?? []).reduce((a, e) => a + e.amountCents, 0);
   const pendingReimb = (data ?? []).filter((e) => e.reimbursable && !e.reimbursed);
@@ -29,23 +32,25 @@ export default function Expenses() {
       <PageHeader title={t("nav.expenses")} subtitle={t("common.lastDays").replace("{n}", String(days))} actions={
         <>
           <select className="input w-auto text-xs" value={days} onChange={(e) => setDays(Number(e.target.value))}>
-            {[7, 30, 90, 365].map((d) => <option key={d} value={d}>Last {d} days</option>)}
+            {[7, 30, 90, 365].map((d) => <option key={d} value={d}>{t("common.lastDays").replace("{n}", String(d))}</option>)}
           </select>
           <button onClick={() => setOpen(true)} className="btn-primary btn-sm">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
             {t("common.new")}</button>
         </>} />
 
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Total spent" value={<Money cents={total} />} tone="warn" sub={`${data?.length ?? 0} entries`} />
-        <Stat label="Reimbursements due" value={<Money cents={pendingReimb.reduce((a, e) => a + e.amountCents, 0)} />} sub={`${pendingReimb.length} pending`} />
-        <Stat label="Categories used" value={breakdown.data?.length ?? 0} />
-        <Stat label="Top category" value={<span className="text-base">{breakdown.data?.[0]?.category ?? "—"}</span>}
-          sub={breakdown.data?.[0] ? <Money cents={breakdown.data[0].amountCents} /> : undefined} />
+      <div className={`mb-4 grid gap-3 ${isStaff ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-4"}`}>
+        <Stat label={isStaff ? t("staff.myExpenses") : "Total spent"} value={<Money cents={total} />} tone="warn" sub={`${data?.length ?? 0} entries`} />
+        <Stat label={t("staff.reimbDue")} value={<Money cents={pendingReimb.reduce((a, e) => a + e.amountCents, 0)} />} sub={`${pendingReimb.length} pending`} />
+        {!isStaff && <>
+          <Stat label="Categories used" value={breakdown.data?.length ?? 0} />
+          <Stat label="Top category" value={<span className="text-base">{breakdown.data?.[0]?.category ?? "—"}</span>}
+            sub={breakdown.data?.[0] ? <Money cents={breakdown.data[0].amountCents} /> : undefined} />
+        </>}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-4">
-        <div className="card overflow-hidden lg:col-span-3">
+      <div className={`grid gap-4 ${isStaff ? "" : "lg:grid-cols-4"}`}>
+        <div className={`card overflow-hidden ${isStaff ? "" : "lg:col-span-3"}`}>
           {loading ? <p className="p-4 text-sm text-ink-400">{t("common.loading")}</p>
           : !data?.length ? <Empty text={t("common.empty")} />
           : <div className="overflow-x-auto">
@@ -70,7 +75,9 @@ export default function Expenses() {
                       <td className="td text-right">
                         {e.reimbursable && (e.reimbursed
                           ? <span className="badge bg-emerald-50 text-emerald-600">Reimbursed</span>
-                          : <button onClick={() => reimburse(e.id)} className="btn-outline btn-sm">Reimburse {e.staff ? e.staff.split(" ")[0] : ""}</button>)}
+                          : isStaff
+                            ? <span className="badge bg-amber-50 text-amber-700">{t("staff.awaitingReimb")}</span>
+                            : <button onClick={() => reimburse(e.id)} className="btn-outline btn-sm">Reimburse {e.staff ? e.staff.split(" ")[0] : ""}</button>)}
                       </td>
                     </tr>
                   ))}
@@ -79,7 +86,7 @@ export default function Expenses() {
             </div>}
         </div>
 
-        <div className="card">
+        {!isStaff && <div className="card">
           <div className="border-b border-ink-100 px-4 py-3"><p className="section-title">By category</p></div>
           <div className="divide-y divide-ink-50">
             {(breakdown.data ?? []).map((c) => {
@@ -97,7 +104,7 @@ export default function Expenses() {
               );
             })}
           </div>
-        </div>
+        </div>}
       </div>
 
       <ExpenseForm open={open} onClose={() => setOpen(false)} onDone={() => { refresh(); breakdown.refresh(); }} />
@@ -108,9 +115,9 @@ export default function Expenses() {
 function ExpenseForm({ open, onClose, onDone }: any) {
   const t = useT();
   const cats = useAction<any[]>("expenses.categories", {});
-  const jobs = useAction<any[]>("jobs.list", { from: iso(addDays(new Date(), -14)), to: iso(addDays(new Date(), 7)), limit: 50 });
+  const jobs = useAction<any[]>("jobs.list", { from: isoDate(addDays(new Date(), -14)), to: isoDate(addDays(new Date(), 7)), limit: 50 });
   const staff = useAction<any[]>("staff.list", {});
-  const [f, setF] = useState<any>({ amount: "", categoryName: "Fuel", vendor: "", note: "", jobId: "", staffId: "", reimbursable: false, spentAt: iso(new Date()) });
+  const [f, setF] = useState<any>({ amount: "", categoryName: "Fuel", vendor: "", note: "", jobId: "", staffId: "", reimbursable: false, spentAt: isoDate(new Date()) });
   const [receipt, setReceipt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);

@@ -59,7 +59,7 @@ From that single declaration the system derives, with no duplication:
 means writing one `defineAction`. The assistant can use it immediately — no chatbot
 code changes, no prompt edits, no hand-written tool schemas to keep in sync.
 
-Currently **70 actions** across 15 categories. An Owner sees all 70; a Cleaner sees 20.
+Currently **72 actions** across 15 categories. An Owner sees all 72; a Cleaner sees 22.
 
 ---
 
@@ -71,6 +71,7 @@ tool-calling loop against OpenRouter over the registry.
 **Setup:** add an OpenRouter key under **Settings → AI Assistant** (stored server-side,
 never returned to the browser), or set `OPENROUTER_API_KEY` in `.env`. The model is a
 setting too — any tool-calling model works, and swapping it requires no code changes.
+`OPENROUTER_BASE_URL` can point at any OpenAI-compatible gateway.
 Without a key the assistant shows a clear "configure a key" state; **everything else in
 the app works normally.**
 
@@ -81,6 +82,11 @@ Things it can do:
 - *"Which customers haven't paid yet?"* / *"How much did we make this month?"*
 - *"Record RM120 petrol expense for today."*
 - *"Find customers who haven't booked in the last 3 months."*
+
+**Thread integrity.** Every `tool_call` the model emits gets a matching tool message
+written immediately, then resolved as the call completes. This holds whether the turn
+ends normally, hits the confirmation gate, errors, or the user cancels — so a thread can
+never be left with an orphaned tool call (which the API rejects on the following turn).
 
 **Safety.** 12 actions are marked `requiresConfirm` — rescheduling, cancelling,
 recording payments and refunds, payouts, user changes. For these the assistant cannot
@@ -117,3 +123,22 @@ visible under **Activity log**.
 - **Auth is a signed session cookie** with SHA-256 password hashing — appropriate for
   this stage, but move to bcrypt/argon2 and a real session store before production.
 - **Drag-and-drop** is on the day/week staff board. Month view is read-only.
+
+## Roles in practice
+
+`Shell.tsx` shows each role only the navigation it can use, and the registry enforces
+the same boundary server-side — the two cannot drift, because the role list lives on the
+action itself.
+
+A **Cleaner** signing in gets a different application, not a degraded one: `/dashboard`
+renders their own day (jobs, hours this week, pay earned, check-in/out) rather than the
+business P&L; `/expenses` shows only expenses they submitted and cannot mark them
+reimbursed; `/calendar` shows only their own column and is read-only. These pages are
+mobile-first, since that is where cleaners use them.
+
+## Testing the assistant without a live model
+
+`OPENROUTER_BASE_URL` makes the loop testable against a stub that returns canned
+completions. The three sequences worth exercising are: read-only tool → final answer;
+gated tool → confirm → execute; and gated tool → **cancel → send another message**,
+which is the path that regresses if tool-call bookkeeping breaks.

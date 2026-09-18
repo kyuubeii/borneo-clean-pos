@@ -6,10 +6,10 @@ import { useT } from "@/components/I18nProvider";
 import { useAction, callAction, toast, Badge, Empty } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import BookingForm from "@/components/BookingForm";
-import { startOfWeek, startOfMonth, addDays, addMonths, fmtTime, fmtDate, sameDay, minsToLabel } from "@/lib/dates";
+import { useCurrentUser } from "@/components/UserProvider";
+import { startOfWeek, startOfMonth, addDays, addMonths, fmtTime, fmtDate, sameDay, minsToLabel, isoDate } from "@/lib/dates";
 
 type View = "day" | "week" | "month";
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 const DOW = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 
 export default function Calendar() {
@@ -25,11 +25,15 @@ export default function Calendar() {
     return { from: startOfWeek(s), to: addDays(startOfWeek(s), 41) };
   }, [view, anchor]);
 
-  const jobs = useAction<any[]>("jobs.list", { from: iso(from), to: iso(to), limit: 100 }, [view]);
+  const me = useCurrentUser();
+  const isStaff = me.role === "STAFF";
+  const jobs = useAction<any[]>("jobs.list",
+    { from: isoDate(from), to: isoDate(to), limit: 100, ...(isStaff && me.staffId ? { staffId: me.staffId } : {}) }, [view]);
   const staff = useAction<any[]>("staff.list", {});
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
 
   async function onDragEnd(e: DragEndEvent) {
+    if (isStaff) return; // Cleaners cannot reassign or reschedule.
     const jobId = String(e.active.id);
     const target = e.over?.id ? String(e.over.id) : null;
     if (!target) return;
@@ -75,17 +79,20 @@ export default function Calendar() {
             <button onClick={() => setAnchor(new Date())} className="border-x border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-600 hover:bg-ink-50">{t("common.today")}</button>
             <button onClick={() => shift(1)} className="px-2.5 py-1.5 text-ink-500 hover:bg-ink-50">›</button>
           </div>
-          <button onClick={() => setNewAt(anchor)} className="btn-primary btn-sm">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
-            {t("common.new")}
-          </button>
+          {!isStaff && (
+            <button onClick={() => setNewAt(anchor)} className="btn-primary btn-sm">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
+              {t("common.new")}
+            </button>
+          )}
         </>} />
 
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
         {jobs.loading ? <p className="text-sm text-ink-400">{t("common.loading")}</p>
-        : view === "month" ? <MonthView from={from} anchor={anchor} jobs={jobs.data ?? []} onPick={setNewAt} />
+        : view === "month" ? <MonthView from={from} anchor={anchor} jobs={jobs.data ?? []} onPick={isStaff ? () => {} : setNewAt} />
         : <StaffBoard days={view === "day" ? [anchor] : Array.from({ length: 7 }, (_, i) => addDays(startOfWeek(anchor), i))}
-            jobs={jobs.data ?? []} staff={staff.data ?? []} view={view} onPick={setNewAt} />}
+            jobs={jobs.data ?? []} staff={isStaff ? (staff.data ?? []).filter((s: any) => s.id === me.staffId) : (staff.data ?? [])}
+            view={view} readOnly={isStaff} onPick={setNewAt} />}
       </DndContext>
 
       <BookingForm open={!!newAt} onClose={() => setNewAt(null)} onDone={jobs.refresh} presetStart={newAt ?? undefined} />
@@ -94,12 +101,12 @@ export default function Calendar() {
 }
 
 /* ----------------------- Week/day: cleaners as columns --------------------- */
-function StaffBoard({ days, jobs, staff, view, onPick }: any) {
+function StaffBoard({ days, jobs, staff, view, onPick, readOnly }: any) {
   const t = useT();
-  const rows = [...staff, { id: "none", name: t("cal.unassigned"), colour: "#cbd5e1" }];
+  const rows = readOnly ? staff : [...staff, { id: "none", name: t("cal.unassigned"), colour: "#cbd5e1" }];
   return (
     <div className="space-y-2">
-      <p className="text-[11px] text-ink-400">{t("cal.dragHint")}</p>
+      {!readOnly && <p className="text-[11px] text-ink-400">{t("cal.dragHint")}</p>}
       <div className="card overflow-x-auto">
         <div className="min-w-[840px]">
           <div className="grid border-b border-ink-100 bg-ink-50/50" style={{ gridTemplateColumns: `160px repeat(${days.length}, minmax(0,1fr))` }}>

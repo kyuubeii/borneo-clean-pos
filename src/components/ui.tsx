@@ -84,13 +84,21 @@ export async function callAction(name: string, input: unknown = {}): Promise<any
   return j.data;
 }
 
+/** Lets a write anywhere (notably the AI assistant) re-fetch every live useAction. */
+const refreshListeners = new Set<() => void>();
+export const refreshAll = () => refreshListeners.forEach((l) => l());
+
 export function useAction<T>(name: string, input: unknown = {}, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const key = JSON.stringify(input);
-  const reload = useRef(0);
   const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const l = () => setTick((x) => x + 1);
+    refreshListeners.add(l);
+    return () => { refreshListeners.delete(l); };
+  }, []);
   useEffect(() => {
     let alive = true;
     setLoading(true);

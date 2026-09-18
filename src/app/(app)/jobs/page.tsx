@@ -4,13 +4,12 @@ import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Badge, Money, Empty } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
-import { fmtDateTime, addDays, minsToLabel } from "@/lib/dates";
+import { fmtDateTime, addDays, minsToLabel, isoDate } from "@/lib/dates";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 const RANGES = [
-  { key: "today", label: "common.today", from: () => iso(new Date()), to: () => iso(new Date()) },
-  { key: "week", label: "cal.week", from: () => iso(new Date()), to: () => iso(addDays(new Date(), 7)) },
-  { key: "past", label: "common.past30", from: () => iso(addDays(new Date(), -30)), to: () => iso(new Date()) },
+  { key: "today", label: "common.today", from: () => isoDate(new Date()), to: () => isoDate(new Date()) },
+  { key: "week", label: "cal.week", from: () => isoDate(new Date()), to: () => isoDate(addDays(new Date(), 7)) },
+  { key: "past", label: "common.past30", from: () => isoDate(addDays(new Date(), -30)), to: () => isoDate(new Date()) },
   { key: "all", label: "common.all", from: () => undefined, to: () => undefined },
 ];
 

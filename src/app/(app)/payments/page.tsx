@@ -4,14 +4,13 @@ import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Money, Empty, Stat } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
-import { fmtDateTime, addDays } from "@/lib/dates";
+import { fmtDateTime, addDays, isoDate } from "@/lib/dates";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export default function Payments() {
   const t = useT();
   const [days, setDays] = useState(30);
-  const { data, loading } = useAction<any[]>("payments.list", { from: iso(addDays(new Date(), -days)), limit: 200 });
+  const { data, loading } = useAction<any[]>("payments.list", { from: isoDate(addDays(new Date(), -days)), limit: 200 });
   const out = useAction<any>("payments.outstanding", {});
 
   const received = (data ?? []).reduce((a, p) => a + p.amountCents, 0);
@@ -20,7 +19,7 @@ export default function Payments() {
     <div>
       <PageHeader title={t("nav.payments")} subtitle={t("common.lastDays").replace("{n}", String(days))} actions={
         <select className="input w-auto text-xs" value={days} onChange={(e) => setDays(Number(e.target.value))}>
-          {[7, 30, 90, 365].map((d) => <option key={d} value={d}>Last {d} days</option>)}
+          {[7, 30, 90, 365].map((d) => <option key={d} value={d}>{t("common.lastDays").replace("{n}", String(d))}</option>)}
         </select>} />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">

@@ -3,9 +3,8 @@ import { useState } from "react";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Money, Empty, Stat } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
-import { startOfMonth, endOfMonth, addDays, addMonths, fmtDate } from "@/lib/dates";
+import { startOfMonth, endOfMonth, addDays, addMonths, fmtDate, isoDate } from "@/lib/dates";
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 const PRESETS = [
   { key: "month", label: "This month", from: () => startOfMonth(new Date()), to: () => endOfMonth(new Date()) },
   { key: "last", label: "Last month", from: () => startOfMonth(addMonths(new Date(), -1)), to: () => endOfMonth(addMonths(new Date(), -1)) },
@@ -17,7 +16,7 @@ export default function Reports() {
   const t = useT();
   const [preset, setPreset] = useState("month");
   const p = PRESETS.find((x) => x.key === preset)!;
-  const from = iso(p.from()), to = iso(p.to());
+  const from = isoDate(p.from()), to = isoDate(p.to());
   const long = preset === "year";
 
   const summary = useAction<any>("reports.summary", { from, to });
