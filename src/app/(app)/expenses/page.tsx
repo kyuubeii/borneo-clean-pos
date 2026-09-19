@@ -26,7 +26,8 @@ export default function Expenses() {
   const owedTotal = (advances.data ?? []).reduce((a: number, x: any) => a + x.stillOwedCents, 0);
 
   async function reimburse(id: string) {
-    try { await callAction("expenses.markReimbursed", { expenseId: id }); toast("Marked reimbursed"); refresh(); }
+    // The two summaries above read from a different action, so they need refreshing too.
+    try { await callAction("expenses.markReimbursed", { expenseId: id }); toast("Marked reimbursed"); refresh(); advances.refresh(); }
     catch (e: any) { toast(e.message, "err"); }
   }
 
