@@ -64,7 +64,7 @@ async function main() {
   const cash = inc.filter((r) => r.pay === "paid").reduce((a, r) => a + C(r.amt), 0) + col.reduce((a, r) => a + C(r.amt), 0);
   check(jobs.reduce((a, j) => a + j.revenueCents, 0) === sales, `sales ${RM(sales)}`);
   check(expenses.reduce((a, e) => a + e.amountCents, 0) === spend, `expenses ${RM(spend)}`);
-  const payments = await db.payment.findMany();
+  const payments = await db.payment.findMany({ include: { invoice: true, customer: true } });
   check(payments.reduce((a, p) => a + p.amountCents, 0) === cash, `cash received ${RM(cash)}`);
   const invoices = await db.invoice.findMany({ include: { items: true } });
   const billed = invoices.reduce((a, i) => a + i.items.reduce((b, x) => b + x.priceCents * x.qty, 0), 0);
@@ -74,8 +74,12 @@ async function main() {
 
   console.log("\n4. Collections settle old invoices — they are never new sales");
   for (const c of col) {
-    const sameDay = jobs.filter((j) => day(j.scheduledAt) === c.d);
-    check(sameDay.length === inc.filter((r) => r.d === c.d).length, `${c.d}: ${sameDay.length} jobs, matching the ${inc.filter((r) => r.d === c.d).length} sales logged that day`);
+    const mine = payments.filter((p) => day(p.paidAt) === c.d && p.customer.name === c.customer);
+    const paid = mine.reduce((a, p) => a + p.amountCents, 0);
+    const older = mine.every((p) => !!p.invoice && day(p.invoice.issuedAt) < c.d);
+    check(paid === C(c.amt) && older && mine.length > 0,
+      `${c.d} ${c.customer}: ${RM(paid)} across ${mine.length} payment(s), all against invoices issued before that day`);
+    check(jobs.every((j) => day(j.scheduledAt) !== c.d), `${c.d}: no job was created for the collection`);
   }
 
   console.log("\n5. The reimbursement is not double-counted");
@@ -86,21 +90,34 @@ async function main() {
   check((await db.staff.findMany()).every((s) => s.name !== "Aaron"), "no duplicate \"Aaron\" — merged into Jong");
 
   console.log("\n6. What is still owed to whoever paid out of pocket");
-  const staff = await db.staff.findMany();
-  for (const s of staff) {
-    const adv = exp.filter((r) => r.by === s.name);
-    const advanced = adv.reduce((a, r) => a + C(r.amt), 0);
-    const cleared = adv.filter((r) => r.cleared).reduce((a, r) => a + C(r.amt), 0);
-    const repaid = rmb.filter((r) => r.to === s.name).reduce((a, r) => a + C(r.amt), 0);
-    const mine = expenses.filter((e) => e.staffId === s.id);
-    check(mine.reduce((a, e) => a + e.amountCents, 0) === advanced,
-      `${s.name} advanced ${RM(advanced)}, cleared ${RM(cleared)}, repaid ${RM(repaid)} -> still owed ${RM(advanced - cleared - repaid)}`);
+  // Every figure below is read back out of the database and only then compared to the log,
+  // so the number printed here is the number the Expenses page works from.
+  for (const person of await db.staff.findMany()) {
+    const src = exp.filter((r) => r.by === person.name);
+    const want = {
+      advanced: src.reduce((a, r) => a + C(r.amt), 0),
+      cleared: src.filter((r) => r.cleared).reduce((a, r) => a + C(r.amt), 0),
+      repaid: rmb.filter((r) => r.to === person.name).reduce((a, r) => a + C(r.amt), 0),
+    };
+    const mine = expenses.filter((e) => e.staffId === person.id);
+    const got = {
+      advanced: mine.reduce((a, e) => a + e.amountCents, 0),
+      cleared: mine.filter((e) => e.reimbursed).reduce((a, e) => a + e.amountCents, 0),
+      repaid: payouts.filter((p) => p.staffId === person.id && p.kind === "REIMBURSEMENT").reduce((a, p) => a + p.amountCents, 0),
+    };
+    const owed = got.advanced - got.cleared - got.repaid;
+    const agrees = (["advanced", "cleared", "repaid"] as const).filter((k) => got[k] !== want[k]);
+    check(agrees.length === 0,
+      `${person.name} advanced ${RM(got.advanced)}, cleared ${RM(got.cleared)}, repaid ${RM(got.repaid)} -> still owed ${RM(owed)}`
+      + (agrees.length ? ` — the log says ${agrees.map((k) => `${k} ${RM(want[k])}`).join(", ")}` : ""));
   }
 
   console.log("\n7. Contact details carried over from the old app");
   for (const p of profiles as { name: string; phone?: string; address?: string }[]) {
     const c = await db.customer.findFirst({ where: { name: p.name }, include: { addresses: true } });
-    check(!!c && (!p.phone || !!c.phone) && (!p.address || c.addresses.length > 0),
+    const phoneOk = !p.phone || c?.phone === p.phone;
+    const addrOk = !p.address || c?.addresses.some((a) => a.line1 === p.address) === true;
+    check(!!c && phoneOk && addrOk,
       `${p.name}: ${c?.phone ?? "no phone on file"} · ${c?.addresses[0]?.line1 ?? "no address on file"}`);
   }
 
