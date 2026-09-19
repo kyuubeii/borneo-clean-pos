@@ -54,8 +54,8 @@ invoices, 26 payments, 71 expenses.
 
 ## 3. Vercel
 
-Log in as the Borneo Clean account, then import the GitHub repository. Set
-these environment variables **before** the first deploy:
+Log in as the Borneo Clean account (`theborneoclean-spec`, team **Borneo Clean**).
+Set these environment variables **before** the first deploy:
 
 | Variable | Value |
 | --- | --- |
@@ -85,6 +85,48 @@ npm run user:password -- <email> <new-password>
 Do not avoid this by setting `SESSION_SECRET` to the fallback value. It is
 committed in this repository, and it also signs session cookies — anyone could
 forge one.
+
+---
+
+## Deploying from the CLI: the git-author block
+
+`vercel deploy` attaches the local git commit metadata to the deployment. The
+Vercel account (`theborneoclean-spec`) is not linked to the GitHub identity
+that authors the commits (`kyuubeii` / oscarkhoz@gmail.com), and the project
+has `gitForkProtection` enabled, so Vercel refuses before it even builds:
+
+    readyState: BLOCKED
+    "The deployment was blocked because the commit author doesn't have
+     permission to create deployments for this project."
+    buildSkipped: true
+
+Nothing in the build is wrong when this happens -- `vercel ls` unhelpfully
+shows it as `UNKNOWN`, and only the API reports `BLOCKED` with a reason:
+
+```bash
+vercel inspect <deployment-url>   # shows UNKNOWN
+# the real answer:
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://api.vercel.com/v13/deployments/<id>?teamId=<team>" | jq .readyStateReason
+```
+
+The workaround used here is to deploy from an export that is not inside the
+git working tree, so no commit metadata is attached:
+
+```bash
+rm -rf /tmp/bc-deploy && mkdir -p /tmp/bc-deploy
+git archive HEAD | tar -x -C /tmp/bc-deploy
+rm -rf /tmp/bc-deploy/scripts          # local tooling; holds customer records
+mkdir -p /tmp/bc-deploy/.vercel && cp .vercel/project.json /tmp/bc-deploy/.vercel/
+cd /tmp/bc-deploy && vercel deploy --prod --yes
+```
+
+Note the directory must be outside the repository -- a subdirectory of it does
+not work, because the CLI walks up the tree to find `.git`.
+
+The durable fix is to connect the GitHub account to Vercel so git-push deploys
+work normally. That needs the `kyuubeii` GitHub identity linked to the Vercel
+account, which is a browser flow.
 
 ---
 
