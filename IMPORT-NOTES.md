@@ -19,7 +19,7 @@ npm run audit                  # checks the app against the log, row by row
 | **Profit** | **RM 572.90** (12.6%) |
 | Cash received | RM 3,230.00 |
 | Still outstanding | RM 1,300.00 |
-| Reimbursements to Jong (excluded from P&L) | RM 2,000.00 |
+| Reimbursements to Jong (excluded from P&L) | RM 2,045.00 |
 
 Cash held: **Oscar RM 2,470.00**, **Jong RM 760.00**.
 Outstanding: Jamenlyn 505 RM 490, Shirley RM 440, Beautrix Sim 507 RM 280, Ivan tan RM 90.
@@ -92,8 +92,16 @@ Kristy, Vera) — the old app does not have them either.
 - **RM 2,000 owed to Jong.** Jong advanced **RM 3,713.20**, of which RM 45.00 was
   cleared at the time and **RM 2,000.00 has been repaid**. **Still owed: RM 1,668.20.**
   Oscar is owed RM 193.90. These are on-account payments rather than settlements of
-  specific expenses, so the Expenses page nets advances against repayments rather than
-  ticking individual rows.
+  specific expenses.
+
+  **How the two records fit together.** A reimbursement payout is the cash that went
+  back; ticking an expense row says which advance that cash covered. They are two
+  records of one repayment, so what someone is owed is `advanced − max(ticked, paid)` —
+  never the sum, which would subtract the same money twice. Ticking a row that an
+  existing payout already covers therefore records the detail without moving the total,
+  and the Expenses page says how much of a repayment is still unmatched. The RM 45
+  settled on the spot on 04/08 is recorded as a payout too, so every ringgit returned
+  has a cash record.
 - **The two RM 400 rows are rent**, not an unknown house cost.
 - **"Liberty" vs "AD"** on the 02/09 aircon job: Liberty is the *address*. The old app
   holds the customer as **AD** at "Liberty groove block 10 level 5 unit 3", which is now
