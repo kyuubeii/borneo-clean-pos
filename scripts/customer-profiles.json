@@ -1,0 +1,23 @@
+[
+  { "name": "AD",               "phone": "+60 16-870 8157",  "address": "Liberty groove block 10 level 5 unit 3" },
+  { "name": "Angie Ng",                                      "address": "liberty groove block 2 unit 302 block 9 unit 911" },
+  { "name": "Annabelle",                                                                                          "source": "Sharon" },
+  { "name": "Apple Yong",       "phone": "+60 16-773 8018",  "address": "Laticube" },
+  { "name": "Beautrix Sim 507", "phone": "+60 12-888 5121",                                                       "note": "Invoice to madam chio su kiong." },
+  { "name": "Charity",          "phone": "+60 10-792 1491",  "address": "36 lorong sungai maong ulu 3a" },
+  { "name": "Edwina Song",      "phone": "+60 16-893 8106",  "address": "Liberty groove 7 flooe 3A unit 7 kuching sarawak" },
+  { "name": "Francis thoo",     "phone": "+60 11-1318 0055", "address": "64 lorong foochow 1n" },
+  { "name": "Grodon teo",       "phone": "+60 10-967 6558",  "address": "Liberty grove block 10-02-01",           "note": "Aircond customer." },
+  { "name": "Ivan tan",         "phone": "+60 12-898 8889",  "address": "kenyalang" },
+  { "name": "Jamenlyn 505",     "phone": "+60 16-888 7740" },
+  { "name": "Jenny ting agent", "phone": "+60 16-863 3911" },
+  { "name": "Joanne",           "phone": "+60 16-378 1199",  "address": "https://maps.app.goo.gl/9dnNsmTkvRQitBKs7?g_st=ic", "source": "Facebook" },
+  { "name": "Judith",           "phone": "+60 10-238 9669",  "address": "1288, lorong keranji 6c" },
+  { "name": "Justin",           "phone": "+60 11-2680 1357", "address": "https://share.google/JnHwXhjYhxCQhl36R" },
+  { "name": "Kristy",                                        "address": "Batu kawa" },
+  { "name": "Lz",               "phone": "+60 12-890 6423" },
+  { "name": "Mr Bong",          "phone": "+60 13-828 3183",  "address": "Liberty Block 2 Level 7",                "source": "Liberty Marketplace group" },
+  { "name": "Shirley",          "phone": "+60 16-714 0114",  "address": "Liberty groove kuching sarawak 7" },
+  { "name": "Teko",             "phone": "+60 10-982 1850" },
+  { "name": "Vera",                                          "address": "No 7 pine residence 86",                 "source": "Sharon" }
+]

@@ -11,6 +11,7 @@
  */
 import { PrismaClient } from "@prisma/client";
 import data from "./import-data.json";
+import { applyCustomerProfiles } from "./customer-profiles";
 
 const db = new PrismaClient();
 const C = (n: number) => Math.round(n * 100);
@@ -43,8 +44,10 @@ async function main() {
     ["House Cleaning", "住家清洁", 7000, 120],
     ["Aircon Cleaning", "冷气清洗", 12000, 90],
   ] as const) {
-    const s = await db.service.create({ data: { name, nameZh, category: "Residential",
-      priceCents: price, durationMin: mins, description: "Price varies per job; set on the booking." } });
+    // Match on name so a re-import reuses the service instead of adding a duplicate.
+    const s = await db.service.findFirst({ where: { name } })
+      ?? await db.service.create({ data: { name, nameZh, category: "Residential",
+        priceCents: price, durationMin: mins, description: "Price varies per job; set on the booking." } });
     svcIds[name] = s.id;
   }
 
@@ -60,6 +63,8 @@ async function main() {
     } });
     custIds[name] = c.id;
   }
+  // Phone numbers, addresses and notes carried over from the old app.
+  await applyCustomerProfiles(db);
 
   /* ---- Sales: booking -> job -> invoice, and a payment when it was paid ---- */
   let bN = 0, jN = 0, iN = 0, pN = 0, eN = 0;
