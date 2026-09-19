@@ -6,3 +6,5 @@ public/uploads/*
 !public/uploads/.gitkeep
 tsconfig.tsbuildinfo
 .next-build
+.env
+.env*.local
