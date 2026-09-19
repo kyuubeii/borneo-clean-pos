@@ -1,0 +1,16 @@
+# Build output -- Vercel builds from source, and shipping these made the
+# upload ~100MB and fail.
+.next
+.next-build
+node_modules
+tsconfig.tsbuildinfo
+
+# Local database and its backups. These hold real customer records and have
+# no business leaving this machine.
+*.db
+*.db-journal
+prisma/*.db
+backups
+
+.git
+.claude
