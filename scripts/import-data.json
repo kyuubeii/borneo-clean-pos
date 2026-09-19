@@ -374,10 +374,12 @@
  },
  {
   "d": "2026-08-27",
-  "k": "CAPITAL",
+  "k": "REIMBURSEMENT",
   "from": "Oscar",
-  "to": "Aaron",
-  "amt": 1000.0
+  "to": "Jong",
+  "amt": 1000.0,
+  "toWas": "Aaron",
+  "note": "Reimbursement to Jong for advanced expenses (payment on account)"
  },
  {
   "d": "2026-08-27",
@@ -666,10 +668,12 @@
  },
  {
   "d": "2026-09-06",
-  "k": "CAPITAL",
+  "k": "REIMBURSEMENT",
   "from": "Oscar",
-  "to": "Aaron",
-  "amt": 1000.0
+  "to": "Jong",
+  "amt": 1000.0,
+  "toWas": "Aaron",
+  "note": "Reimbursement to Jong for advanced expenses (payment on account)"
  },
  {
   "d": "2026-09-07",

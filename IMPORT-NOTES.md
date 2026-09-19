@@ -12,15 +12,19 @@ Re-runnable: `npm run reset -- --yes && npm run import:tx -- --yes`.
 | **Profit** | **RM 572.90** (12.6%) |
 | Cash received | RM 3,230.00 |
 | Still outstanding | RM 1,300.00 |
-| Capital transfers (excluded from P&L) | RM 2,000.00 |
+| Reimbursements to Jong (excluded from P&L) | RM 2,000.00 |
 
 Cash held: **Oscar RM 2,470.00**, **Jong RM 760.00**.
 Outstanding: Jamenlyn 505 RM 490, Shirley RM 440, Beautrix Sim 507 RM 280, Ivan tan RM 90.
 
 ## Rules applied
 
-- Capital transfers (2 × RM 1,000 Oscar → Aaron) are in a separate `CapitalEntry`
-  ledger, not income or expenses.
+- **"Aaron" is Jong** — the same person, confirmed by Oscar. Merged into one record.
+- The two RM 1,000 payments (27/08 and 06/09) are **reimbursements**, not capital.
+  Oscar was paying Jong back for expenses Jong had advanced. They are recorded as
+  reimbursement payouts, not expenses: the underlying costs were already counted when
+  they were incurred, so counting the repayment again would double-count them.
+  **Profit is unaffected either way — it stays RM 572.90.**
 - The two collections on 04/09 settle earlier invoices and are **not** counted as sales.
 - `paid_to` is recorded on the payment as *received by*, so cash-in-hand per person
   reconciles.
@@ -59,11 +63,24 @@ Outstanding: Jamenlyn 505 RM 490, Shirley RM 440, Beautrix Sim 507 RM 280, Ivan 
    has an Edwina Song RM 80 on 21/08 that is not in your transaction log. This import
    follows **your transaction log**, not the old app.
 
-8. **Reimbursements owed are large**: Jong has advanced **RM 3,668.20** and Oscar
-   RM 193.90 that are not marked cleared. Only the 04/08 worker and driver payments were
-   flagged `cleared`. If Jong has in fact been settled since, mark those expenses
-   reimbursed under Expenses.
+8. **RESOLVED — money owed to Jong.** Jong advanced **RM 3,713.20**, of which RM 45.00
+   was cleared at the time and **RM 2,000.00 has been repaid** (the two payments above).
+   **Still owed to Jong: RM 1,668.20.** Oscar is owed RM 193.90. These are on-account
+   payments rather than settlements of specific expenses, so the Expenses page nets
+   advances against repayments rather than ticking individual rows.
 
 9. **Worker and Driver costs are lump sums per day**, not per named cleaner, so they are
    recorded as business expenses rather than staff payroll. Job-level labour costing will
    therefore read zero; day-level cost is accurate.
+
+
+## Audit result — 19 Sept 2026
+
+Checked every source row against the app: **no mismatches**.
+
+- 39 jobs = 39 INCOME rows; 71 expenses = 71 EXPENSE rows; 2 reimbursements
+- every income and expense row has a matching record on the same date
+- sales RM 4,530.00, expenses RM 3,957.10, cash in RM 3,230.00 — all tie to the source
+- no jobs exist on 04/09, confirming the RM 530 collected was not counted as new sales
+- the RM 2,000 reimbursement is not recorded anywhere as an expense, so it is not
+  double-counted, and no duplicate "Aaron" record remains

@@ -307,6 +307,7 @@ model Expense {
 model Payout {
   id         String   @id @default(cuid())
   ref        String   @unique
+  kind       String   @default("EARNINGS") // EARNINGS | REIMBURSEMENT
   staffId    String
   staff      Staff    @relation(fields: [staffId], references: [id])
   periodStart DateTime

@@ -18,9 +18,12 @@ export default function Expenses() {
   // reports.expenseBreakdown is owner/admin only, so cleaners never request it.
   const breakdown = useAction<any[]>(isStaff ? "expenses.categories" : "reports.expenseBreakdown",
     isStaff ? {} : { from, to: isoDate(new Date()) });
+  // Net of reimbursements already paid back, not the gross of every advance.
+  const advances = useAction<any[]>("staff.advances", {});
 
   const total = (data ?? []).reduce((a, e) => a + e.amountCents, 0);
   const pendingReimb = (data ?? []).filter((e) => e.reimbursable && !e.reimbursed);
+  const owedTotal = (advances.data ?? []).reduce((a: number, x: any) => a + x.stillOwedCents, 0);
 
   async function reimburse(id: string) {
     try { await callAction("expenses.markReimbursed", { expenseId: id }); toast("Marked reimbursed"); refresh(); }
@@ -41,7 +44,8 @@ export default function Expenses() {
 
       <div className={`mb-4 grid gap-3 ${isStaff ? "grid-cols-2" : "grid-cols-2 lg:grid-cols-4"}`}>
         <Stat label={isStaff ? t("staff.myExpenses") : "Total spent"} value={<Money cents={total} />} tone="warn" sub={`${data?.length ?? 0} entries`} />
-        <Stat label={t("staff.reimbDue")} value={<Money cents={pendingReimb.reduce((a, e) => a + e.amountCents, 0)} />} sub={`${pendingReimb.length} pending`} />
+        <Stat label={t("staff.reimbDue")} value={<Money cents={owedTotal} />}
+          sub={(advances.data ?? []).filter((x: any) => x.stillOwedCents > 0).map((x: any) => `${x.name} ${(x.stillOwedCents/100).toFixed(0)}`).join(" · ") || undefined} />
         {!isStaff && <>
           <Stat label="Categories used" value={breakdown.data?.length ?? 0} />
           <Stat label="Top category" value={<span className="text-base">{breakdown.data?.[0]?.category ?? "—"}</span>}
@@ -86,7 +90,25 @@ export default function Expenses() {
             </div>}
         </div>
 
-        {!isStaff && <div className="card">
+        {!isStaff && <div className="space-y-4">
+        <div className="card">
+          <div className="border-b border-ink-100 px-4 py-3"><p className="section-title">Money advanced by staff</p></div>
+          <div className="divide-y divide-ink-50">
+            {(advances.data ?? []).map((x: any) => (
+              <div key={x.staffId} className="px-4 py-2.5">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-ink-800">{x.name}</span>
+                  <Money cents={x.stillOwedCents} className={x.stillOwedCents > 0 ? "font-semibold text-amber-600" : "text-ink-300"} />
+                </div>
+                <p className="mt-0.5 text-[11px] text-ink-400">
+                  advanced <Money cents={x.advancedCents} /> · repaid <Money cents={x.repaidCents + x.clearedCents} /> · {x.entries} entries
+                </p>
+              </div>
+            ))}
+            {!advances.data?.length && <p className="px-4 py-5 text-center text-xs text-ink-400">Nobody has advanced money</p>}
+          </div>
+        </div>
+        <div className="card">
           <div className="border-b border-ink-100 px-4 py-3"><p className="section-title">By category</p></div>
           <div className="divide-y divide-ink-50">
             {(breakdown.data ?? []).map((c) => {
@@ -104,6 +126,7 @@ export default function Expenses() {
               );
             })}
           </div>
+        </div>
         </div>}
       </div>
 

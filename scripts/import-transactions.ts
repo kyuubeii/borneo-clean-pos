@@ -30,7 +30,8 @@ async function main() {
 
   /* ---- People who handle money ---- */
   const staff: Record<string, string> = {};
-  for (const [name, pay] of [["Oscar", 0], ["Jong", 0], ["Aaron", 0]] as const) {
+  // "Aaron" in the source log is Jong — same person, confirmed by Oscar.
+  for (const [name, pay] of [["Oscar", 0], ["Jong", 0]] as const) {
     const s = await db.staff.create({ data: { name, payType: "PER_JOB", payRate: pay,
       notes: "Created by the transaction import — set pay details when you get a chance." } });
     staff[name] = s.id;
@@ -144,18 +145,29 @@ async function main() {
     } });
   }
 
-  /* ---- Capital: excluded from P&L by design ---- */
+  /* ---- Reimbursements: settle money already spent, so never a new expense ---- */
   let cN = 0;
+  for (const r of rows.filter((x) => x.k === "REIMBURSEMENT")) {
+    await db.payout.create({ data: {
+      ref: `RMB-${String(++cN).padStart(4, "0")}`, kind: "REIMBURSEMENT",
+      staffId: staff[r.to!], amountCents: C(r.amt),
+      periodStart: at(r.d), periodEnd: at(r.d), status: "PAID", paidAt: at(r.d), createdAt: at(r.d),
+      note: `Reimbursement to ${r.to} for expenses advanced, paid by ${r.from}. The underlying costs are already recorded as expenses, so this is not a new expense.`,
+    } });
+  }
+
+  /* ---- Capital: excluded from P&L by design ---- */
+  let capN = 0;
   for (const r of rows.filter((x) => x.k === "CAPITAL")) {
     await db.capitalEntry.create({ data: {
-      ref: ref("CAP", ++cN), kind: "TRANSFER", amountCents: C(r.amt), occurredAt: at(r.d),
+      ref: ref("CAP", ++capN), kind: "TRANSFER", amountCents: C(r.amt), occurredAt: at(r.d),
       fromId: r.from ? staff[r.from] : null, toId: r.to ? staff[r.to] : null,
       fromName: r.from, toName: r.to,
       note: "Capital transfer — not income or expense.",
     } });
   }
 
-  console.log(`\nImported: ${bN} bookings/jobs, ${iN} invoices, ${pN} payments, ${eN} expenses, ${cN} capital entries, ${names.length} customers`);
+  console.log(`\nImported: ${bN} bookings/jobs, ${iN} invoices, ${pN} payments, ${eN} expenses, ${cN} reimbursements, ${capN} capital entries, ${names.length} customers`);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); }).finally(() => db.$disconnect());

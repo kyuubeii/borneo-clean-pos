@@ -79,6 +79,30 @@ defineAction({
   handler: async (i) => db.expenseCategory.create({ data: i }),
 });
 
+defineAction({
+  name: "staff.advances",
+  description: "What the business still owes each person for expenses they paid out of their own pocket: total advanced, less anything cleared at the time, less reimbursements already paid back.",
+  category: "Expenses", roles: ["OWNER", "ADMIN"], readOnly: true,
+  input: z.object({ staffId: z.string().optional() }),
+  handler: async ({ staffId }, ctx) => {
+    // A cleaner only ever sees their own position.
+    if (ctx.user.role === "STAFF") staffId = ctx.user.staffId ?? "__none__";
+    const staff = await db.staff.findMany({ where: staffId ? { id: staffId } : {} });
+    const out = [];
+    for (const s of staff) {
+      const adv = await db.expense.findMany({ where: { staffId: s.id } });
+      if (!adv.length) continue;
+      const advanced = adv.reduce((a, e) => a + e.amountCents, 0);
+      const cleared = adv.filter((e) => e.reimbursed).reduce((a, e) => a + e.amountCents, 0);
+      const repaid = (await db.payout.findMany({ where: { staffId: s.id, kind: "REIMBURSEMENT", status: "PAID" } }))
+        .reduce((a, p) => a + p.amountCents, 0);
+      out.push({ staffId: s.id, name: s.name, advancedCents: advanced, clearedCents: cleared,
+        repaidCents: repaid, stillOwedCents: advanced - cleared - repaid, entries: adv.length });
+    }
+    return out.sort((a, b) => b.stillOwedCents - a.stillOwedCents);
+  },
+});
+
 /* --------------------------------- Payroll --------------------------------- */
 
 defineAction({
