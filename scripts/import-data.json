@@ -51,7 +51,8 @@
   "k": "EXP",
   "cat": "Introducer",
   "amt": 8.0,
-  "person": "Vero"
+  "person": "Vero",
+  "by": "Oscar"
  },
  {
   "d": "2026-08-05",
@@ -189,7 +190,8 @@
   "k": "EXP",
   "cat": "Introducer",
   "amt": 16.0,
-  "person": "Sharon"
+  "person": "Sharon",
+  "by": "Jong"
  },
  {
   "d": "2026-08-08",

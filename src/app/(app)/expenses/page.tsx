@@ -102,8 +102,11 @@ export default function Expenses() {
                   <Money cents={x.stillOwedCents} className={x.stillOwedCents > 0 ? "font-semibold text-amber-600" : "text-ink-300"} />
                 </div>
                 <p className="mt-0.5 text-[11px] text-ink-400">
-                  advanced <Money cents={x.advancedCents} /> · repaid <Money cents={x.repaidCents + x.clearedCents} /> · {x.entries} entries
+                  advanced <Money cents={x.advancedCents} /> · settled on rows <Money cents={x.clearedCents} /> · {x.entries} entries
                 </p>
+                {x.repaidCents > 0 && <p className="mt-0.5 text-[11px] text-ink-400">
+                  plus <Money cents={x.repaidCents} /> paid back on account, which is why rows it covered are not ticked
+                </p>}
               </div>
             ))}
             {!advances.data?.length && <p className="px-4 py-5 text-center text-xs text-ink-400">Nobody has advanced money</p>}

@@ -38,7 +38,12 @@ function pair(label: string, src: { d: string; amt: number }[], got: { d: string
 }
 
 async function main() {
-  console.log(`Source: ${rows.length} rows, ${rows[0].d} to ${[...rows].sort((a, b) => a.d.localeCompare(b.d)).at(-1)!.d}\n`);
+  const dates = rows.map((r) => r.d).sort();
+  const [from, to] = [dates[0], dates.at(-1)!];
+  // Anything dated after the log is new business done in the app, not an import problem,
+  // so the comparison is scoped to the period the log covers.
+  const within = (d: Date) => day(d) >= from && day(d) <= to;
+  console.log(`Source: ${rows.length} rows, ${from} to ${to}\n`);
 
   const inc = rows.filter((r) => r.k === "INC");
   const exp = rows.filter((r) => r.k === "EXP");
@@ -46,13 +51,18 @@ async function main() {
   const rmb = rows.filter((r) => r.k === "REIMBURSEMENT");
 
   console.log("1. Everything in the log reached the app");
-  const jobs = await db.job.findMany();
-  const expenses = await db.expense.findMany({ include: { category: true } });
-  const payouts = await db.payout.findMany();
+  const allJobs = await db.job.findMany();
+  const allExpenses = await db.expense.findMany({ include: { category: true } });
+  const allPayouts = await db.payout.findMany();
+  const jobs = allJobs.filter((j) => within(j.scheduledAt));
+  const expenses = allExpenses.filter((e) => within(e.spentAt));
+  const payouts = allPayouts.filter((p) => p.paidAt && within(p.paidAt));
+  const later = (allJobs.length - jobs.length) + (allExpenses.length - expenses.length) + (allPayouts.length - payouts.length);
+  if (later) console.log(`  (${later} record(s) dated outside ${from}–${to} — work done in the app since, not checked here)`);
   check(jobs.length === inc.length, `${inc.length} sales in the log, ${jobs.length} jobs in the app`);
   check(expenses.length === exp.length, `${exp.length} expenses in the log, ${expenses.length} in the app`);
   check(payouts.filter((p) => p.kind === "REIMBURSEMENT").length === rmb.length, `${rmb.length} reimbursements in the log, ${payouts.filter((p) => p.kind === "REIMBURSEMENT").length} in the app`);
-  check(await db.capitalEntry.count() === 0, "no capital entries — the RM 2,000 is a reimbursement, not capital");
+  check((await db.capitalEntry.count()) === 0, "no capital entries — the RM 2,000 is a reimbursement, not capital");
 
   console.log("\n2. Row by row, on date and amount");
   pair("sales", inc.map((r) => ({ d: r.d, amt: r.amt })), jobs.map((j) => ({ d: day(j.scheduledAt), cents: j.revenueCents })));
@@ -64,9 +74,9 @@ async function main() {
   const cash = inc.filter((r) => r.pay === "paid").reduce((a, r) => a + C(r.amt), 0) + col.reduce((a, r) => a + C(r.amt), 0);
   check(jobs.reduce((a, j) => a + j.revenueCents, 0) === sales, `sales ${RM(sales)}`);
   check(expenses.reduce((a, e) => a + e.amountCents, 0) === spend, `expenses ${RM(spend)}`);
-  const payments = await db.payment.findMany({ include: { invoice: true, customer: true } });
+  const payments = (await db.payment.findMany({ include: { invoice: true, customer: true } })).filter((p) => within(p.paidAt));
   check(payments.reduce((a, p) => a + p.amountCents, 0) === cash, `cash received ${RM(cash)}`);
-  const invoices = await db.invoice.findMany({ include: { items: true } });
+  const invoices = (await db.invoice.findMany({ include: { items: true } })).filter((i) => within(i.issuedAt));
   const billed = invoices.reduce((a, i) => a + i.items.reduce((b, x) => b + x.priceCents * x.qty, 0), 0);
   check(billed === sales, `invoiced ${RM(billed)} — every sale has an invoice for the same amount`);
   check(billed - payments.reduce((a, p) => a + p.amountCents, 0) === sales - cash, `outstanding ${RM(sales - cash)}`);
@@ -79,7 +89,7 @@ async function main() {
     const older = mine.every((p) => !!p.invoice && day(p.invoice.issuedAt) < c.d);
     check(paid === C(c.amt) && older && mine.length > 0,
       `${c.d} ${c.customer}: ${RM(paid)} across ${mine.length} payment(s), all against invoices issued before that day`);
-    check(jobs.every((j) => day(j.scheduledAt) !== c.d), `${c.d}: no job was created for the collection`);
+    check(allJobs.every((j) => day(j.scheduledAt) !== c.d), `${c.d}: no job was created for the collection`);
   }
 
   console.log("\n5. The reimbursement is not double-counted");

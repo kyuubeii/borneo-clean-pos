@@ -60,7 +60,27 @@ defineAction({
   description: "Mark a reimbursable expense as paid back to the staff member.",
   category: "Expenses", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
   input: z.object({ expenseId: z.string() }),
-  handler: async ({ expenseId }) => db.expense.update({ where: { id: expenseId }, data: { reimbursed: true } }),
+  handler: async ({ expenseId }) => {
+    const e = await db.expense.findUnique({ where: { id: expenseId } });
+    if (!e) throw new Error("That expense does not exist.");
+    if (e.reimbursed) return e;
+    // A payout already pays the person back on account. Ticking rows it has covered
+    // would subtract the same money twice, so stop before the total goes past the debt.
+    if (e.staffId) {
+      const mine = await db.expense.findMany({ where: { staffId: e.staffId } });
+      const advanced = mine.reduce((a, x) => a + x.amountCents, 0);
+      const settled = mine.filter((x) => x.reimbursed).reduce((a, x) => a + x.amountCents, 0);
+      const repaid = (await db.payout.findMany({ where: { staffId: e.staffId, kind: "REIMBURSEMENT", status: "PAID" } }))
+        .reduce((a, p) => a + p.amountCents, 0);
+      const owed = advanced - settled - repaid;
+      if (e.amountCents > owed) {
+        const rm = (c: number) => `RM ${(c / 100).toFixed(2)}`;
+        throw new Error(
+          `That would pay back more than is owed. ${rm(advanced)} was advanced, ${rm(settled)} is already marked reimbursed and ${rm(repaid)} was paid on account, leaving ${rm(owed)} outstanding — less than this ${rm(e.amountCents)} expense. The money is already accounted for.`);
+      }
+    }
+    return db.expense.update({ where: { id: expenseId }, data: { reimbursed: true } });
+  },
 });
 
 defineAction({
