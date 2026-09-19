@@ -8,3 +8,6 @@ tsconfig.tsbuildinfo
 .next-build
 .env
 .env*.local
+.vercel
+.env*
+!.env.example
