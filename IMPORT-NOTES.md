@@ -19,9 +19,14 @@ npm run audit                  # checks the app against the log, row by row
 | **Profit** | **RM 572.90** (12.6%) |
 | Cash received | RM 3,230.00 |
 | Still outstanding | RM 1,300.00 |
-| Reimbursements to Jong (excluded from P&L) | RM 2,045.00 |
+| Reimbursements to Jong (excluded from P&L) | RM 2,805.00 |
 
-Cash held: **Oscar RM 2,470.00**, **Jong RM 760.00**.
+Collected: **Oscar RM 2,470.00**, **Jong RM 760.00**. Jong keeps his RM 760 against what
+he is owed, and Oscar has paid out RM 2,045.00 to Jong and taken RM 201.90 back for his
+own advances, so **RM 223.10 of business cash is in hand**, all of it with Oscar.
+That reconciles: RM 223.10 in hand + RM 1,300.00 still to collect − RM 950.20 owed to
+Jong = RM 572.90, the profit.
+
 Outstanding: Jamenlyn 505 RM 490, Shirley RM 440, Beautrix Sim 507 RM 280, Ivan tan RM 90.
 
 ## Rules applied
@@ -102,6 +107,12 @@ Kristy, Vera) — the old app does not have them either.
   and the Expenses page says how much of a repayment is still unmatched. The RM 45
   settled on the spot on 04/08 is recorded as a payout too, so every ringgit returned
   has a cash record.
+
+  **The RM 760 Jong collected settles part of the debt.** Rather than hand over the cash
+  he took from Kristy, Annabelle, Apple Yong, Lz and Vera, Jong keeps it against what he
+  is owed, so it is recorded as a reimbursement payout dated 17/09 — no cash moved, it
+  never left him. Repaid to date is therefore RM 2,805.00 and **Jong is owed RM 950.20**.
+  Oscar's RM 201.90 is fully settled.
 - **The two RM 400 rows are rent**, not an unknown house cost.
 - **"Liberty" vs "AD"** on the 02/09 aircon job: Liberty is the *address*. The old app
   holds the customer as **AD** at "Liberty groove block 10 level 5 unit 3", which is now
