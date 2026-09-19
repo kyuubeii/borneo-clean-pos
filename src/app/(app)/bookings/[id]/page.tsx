@@ -1,5 +1,5 @@
 "use client";
-import { use, useState } from "react";
+import { use, useState, useEffect } from "react";
 import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Badge, Money, Empty, Modal, Field, callAction, toast } from "@/components/ui";
@@ -12,6 +12,7 @@ export default function BookingDetail({ params }: { params: Promise<{ id: string
   const { data: b, loading, refresh } = useAction<any>("bookings.get", { bookingId: id });
   const [resched, setResched] = useState(false);
   const [cancel, setCancel] = useState(false);
+  const [edit, setEdit] = useState(false);
 
   if (loading) return <p className="text-sm text-ink-400">{t("common.loading")}</p>;
   if (!b) return <Empty text="Booking not found" />;
@@ -23,10 +24,11 @@ export default function BookingDetail({ params }: { params: Promise<{ id: string
     <div className="space-y-4">
       <PageHeader title={b.ref} subtitle={b.customer.name}
         actions={<>
-          {b.status !== "CANCELLED" && <>
-            <button onClick={() => setResched(true)} className="btn-outline btn-sm">{t("bk.reschedule")}</button>
-            <button onClick={() => setCancel(true)} className="btn-outline btn-sm text-red-600">{t("bk.cancelBooking")}</button>
-          </>}
+          {/* A past visit is exactly the one you need to correct, so editing is never
+              hidden by the date — only a cancelled booking drops the cancel button. */}
+          <button onClick={() => setEdit(true)} className="btn-outline btn-sm">{t("common.edit")}</button>
+          <button onClick={() => setResched(true)} className="btn-outline btn-sm">{t("bk.reschedule")}</button>
+          {b.status !== "CANCELLED" && <button onClick={() => setCancel(true)} className="btn-outline btn-sm text-red-600">{t("bk.cancelBooking")}</button>}
           <Link href="/bookings" className="btn-outline btn-sm">{t("common.back")}</Link>
         </>} />
 
@@ -65,6 +67,7 @@ export default function BookingDetail({ params }: { params: Promise<{ id: string
         </div>
       </div>
 
+      <EditModal open={edit} onClose={() => setEdit(false)} booking={b} onDone={refresh} />
       <RescheduleModal open={resched} onClose={() => setResched(false)} booking={b} onDone={refresh} />
       <CancelModal open={cancel} onClose={() => setCancel(false)} booking={b} recurring={!!recurring} onDone={refresh} />
     </div>
@@ -125,6 +128,67 @@ function CancelModal({ open, onClose, booking, recurring, onDone }: any) {
         )}
         <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.back")}</button>
           <button onClick={go} disabled={busy} className="btn-danger">{t("bk.cancelBooking")}</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Everything about a booking except its date, which goes through Reschedule so the
+ *  move is announced, and its amount, which is corrected on the job so the invoice
+ *  stays in step. */
+function EditModal({ open, onClose, booking, onDone }: any) {
+  const t = useT();
+  const cust = useAction<any>("customers.get", { customerId: booking.customerId });
+  const [f, setF] = useState({
+    durationMin: String(booking.durationMin), addressId: booking.addressId ?? "",
+    notes: booking.notes ?? "", internalNotes: booking.internalNotes ?? "", status: booking.status,
+  });
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    setF({ durationMin: String(booking.durationMin), addressId: booking.addressId ?? "",
+      notes: booking.notes ?? "", internalNotes: booking.internalNotes ?? "", status: booking.status });
+  }, [open, booking]);
+
+  async function go() {
+    setBusy(true);
+    try {
+      await callAction("bookings.update", {
+        bookingId: booking.id, durationMin: Number(f.durationMin) || booking.durationMin,
+        addressId: f.addressId || undefined, notes: f.notes, internalNotes: f.internalNotes,
+      });
+      if (f.status !== booking.status) await callAction("bookings.updateStatus", { bookingId: booking.id, status: f.status });
+      toast("Booking updated"); onDone(); onClose();
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={open} onClose={onClose} title={`${t("common.edit")} ${booking.ref}`}>
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label={`${t("common.duration")} (minutes)`}>
+            <input className="input" inputMode="numeric" value={f.durationMin} onChange={(e) => setF({ ...f, durationMin: e.target.value })} />
+          </Field>
+          <Field label={t("common.status")}>
+            <select className="input" value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}>
+              {["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"].map((x) => <option key={x} value={x}>{t(`bk.status.${x}`)}</option>)}
+            </select>
+          </Field>
+        </div>
+        <Field label={t("common.address")}>
+          <select className="input" value={f.addressId} onChange={(e) => setF({ ...f, addressId: e.target.value })}>
+            <option value="">— none —</option>
+            {(cust.data?.addresses ?? []).map((a: any) => <option key={a.id} value={a.id}>{[a.label, a.line1].filter(Boolean).join(" · ")}</option>)}
+          </select>
+        </Field>
+        <Field label={t("job.instructions")}><textarea className="input" rows={2} value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} /></Field>
+        <Field label="Internal notes"><textarea className="input" rows={2} value={f.internalNotes} onChange={(e) => setF({ ...f, internalNotes: e.target.value })} /></Field>
+        <p className="text-[11px] text-ink-400">
+          Date and time are changed with Reschedule.
+          {booking.job && <> The amount is corrected on <Link href={`/jobs/${booking.job.id}`} className="text-brand-600 hover:underline">job {booking.job.ref}</Link>, so the invoice moves with it.</>}
+        </p>
+        <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
+          <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : t("common.save")}</button></div>
       </div>
     </Modal>
   );

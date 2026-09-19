@@ -1,10 +1,12 @@
 "use client";
-import { use, useState, useRef } from "react";
+import { use, useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Badge, Money, Empty, Modal, Field, callAction, toast } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import { fmtDateTime, toInput, minsToLabel } from "@/lib/dates";
+import { toCents, fmt } from "@/lib/money";
+import { useIsStaff } from "@/components/UserProvider";
 
 const NEXT: Record<string, string> = { SCHEDULED: "EN_ROUTE", EN_ROUTE: "IN_PROGRESS", IN_PROGRESS: "COMPLETED" };
 
@@ -13,9 +15,14 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
   const t = useT();
   const { data: j, loading, refresh } = useAction<any>("jobs.get", { jobId: id });
   const costing = useAction<any>("jobs.costing", { jobId: id });
+  // Costing is a separate query, so anything that moves money has to refresh both.
+  const reload = () => { refresh(); costing.refresh(); };
   const [assign, setAssign] = useState(false);
   const [resched, setResched] = useState(false);
   const [notes, setNotes] = useState<string | null>(null);
+  const [price, setPrice] = useState(false);
+  const [move, setMove] = useState(false);
+  const isStaff = useIsStaff();
   const [busy, setBusy] = useState(false);
 
   async function run(fn: () => Promise<any>, msg: string) {
@@ -45,6 +52,10 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
               className="btn-primary btn-sm">Create invoice</button>
           )}
           <button onClick={() => setResched(true)} className="btn-outline btn-sm">{t("bk.reschedule")}</button>
+          {!isStaff && <>
+            <button onClick={() => setPrice(true)} className="btn-outline btn-sm">Edit amount</button>
+            <button onClick={() => setMove(true)} className="btn-outline btn-sm">Change customer</button>
+          </>}
           <Link href="/jobs" className="btn-outline btn-sm">{t("common.back")}</Link>
         </>} />
 
@@ -83,7 +94,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
             </div>
           </div>
 
-          <Photos job={j} onDone={refresh} />
+          <Photos job={j} onDone={reload} />
 
           <div className="card card-pad">
             <div className="mb-3 flex items-center justify-between">
@@ -152,9 +163,11 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
         </div>
       </div>
 
-      <AssignModal open={assign} onClose={() => setAssign(false)} job={j} onDone={refresh} />
-      <RescheduleJob open={resched} onClose={() => setResched(false)} job={j} onDone={refresh} />
-      <NotesModal value={notes} onClose={() => setNotes(null)} job={j} onDone={refresh} />
+      <AssignModal open={assign} onClose={() => setAssign(false)} job={j} onDone={reload} />
+      <RescheduleJob open={resched} onClose={() => setResched(false)} job={j} onDone={reload} />
+      <NotesModal value={notes} onClose={() => setNotes(null)} job={j} onDone={reload} />
+      <PriceModal open={price} onClose={() => setPrice(false)} job={j} onDone={reload} />
+      <MoveCustomerModal open={move} onClose={() => setMove(false)} job={j} onDone={reload} />
     </div>
   );
 }
@@ -292,6 +305,74 @@ function NotesModal({ value, onClose, job, onDone }: any) {
         <Field label={t("job.staffNotes")}><textarea className="input" rows={3} value={staffNotes} onChange={(e) => setStaffNotes(e.target.value)} /></Field>
         <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
           <button onClick={go} disabled={busy} className="btn-primary">{t("common.save")}</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Correcting the amount moves the booking line, the job and the invoice together. */
+function PriceModal({ open, onClose, job, onDone }: any) {
+  const t = useT();
+  const [amount, setAmount] = useState((job.revenueCents / 100).toFixed(2));
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) setAmount((job.revenueCents / 100).toFixed(2)); }, [open, job.revenueCents]);
+  async function go() {
+    setBusy(true);
+    try {
+      const r = await callAction("jobs.setPrice", { jobId: job.id, amountCents: toCents(amount) });
+      toast(r.invoice && r.invoice.outstandingCents > 0
+        ? `Updated — ${fmt(r.invoice.outstandingCents)} now outstanding on ${r.invoice.ref}`
+        : "Amount updated");
+      onDone(); onClose();
+    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open={open} onClose={onClose} title={`Edit amount · ${job.ref}`}>
+      <div className="space-y-3">
+        <Field label="Amount charged (RM)" hint="Updates the booking, the job and the invoice together.">
+          <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        </Field>
+        <p className="text-[11px] text-ink-400">
+          Currently <Money cents={job.revenueCents} />. Money already received stays received — the invoice simply
+          goes back to part-paid if the new amount is higher.
+        </p>
+        <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
+          <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : t("common.save")}</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Filed under the wrong name: moves the booking, job, invoice and payments at once. */
+function MoveCustomerModal({ open, onClose, job, onDone }: any) {
+  const t = useT();
+  const [q, setQ] = useState("");
+  const { data } = useAction<any[]>("customers.search", { query: q || undefined, limit: 20 });
+  const [busy, setBusy] = useState(false);
+  async function go(customerId: string, name: string) {
+    if (!confirm(`Move ${job.ref} from ${job.customer.name} to ${name}? The booking, invoice and any payments move too.`)) return;
+    setBusy(true);
+    try { const r = await callAction("jobs.reassignCustomer", { jobId: job.id, customerId });
+      toast(`Moved to ${r.to}`); onDone(); onClose(); }
+    catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open={open} onClose={onClose} title={`Change customer · ${job.ref}`}>
+      <div className="space-y-3">
+        <p className="text-sm text-ink-600">Currently filed under <strong>{job.customer.name}</strong>.</p>
+        <Field label="Move to"><input className="input" placeholder="Search name, phone or company" value={q} onChange={(e) => setQ(e.target.value)} autoFocus /></Field>
+        <div className="max-h-64 overflow-y-auto rounded-lg border border-ink-100 divide-y divide-ink-50">
+          {(data ?? []).filter((c) => c.id !== job.customerId).map((c) => (
+            <button key={c.id} disabled={busy} onClick={() => go(c.id, c.name)}
+              className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-ink-50">
+              <span className="font-medium text-ink-800">{c.name}</span>
+              <span className="text-[11px] text-ink-400">{c.phone ?? c.addresses?.[0]?.line1 ?? ""}</span>
+            </button>
+          ))}
+          {!data?.length && <p className="px-3 py-4 text-center text-xs text-ink-400">No match</p>}
+        </div>
+        <p className="text-[11px] text-ink-400">The amount does not change — only whose record it sits on.</p>
+        <div className="flex justify-end"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button></div>
       </div>
     </Modal>
   );

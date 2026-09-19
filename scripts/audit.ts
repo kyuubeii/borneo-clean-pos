@@ -25,16 +25,30 @@ const check = (ok: boolean, msg: string) => { console.log(`  ${ok ? "ok  " : "FA
 function pair(label: string, src: { d: string; amt: number }[], got: { d: string; cents: number }[]) {
   const bag = new Map<string, number>();
   for (const g of got) bag.set(`${g.d}|${g.cents}`, (bag.get(`${g.d}|${g.cents}`) ?? 0) + 1);
-  const unmatched: string[] = [];
+  const unmatched: { d: string; cents: number }[] = [];
   for (const r of src) {
     const key = `${r.d}|${C(r.amt)}`;
     const n = bag.get(key) ?? 0;
-    if (n === 0) unmatched.push(`${r.d} ${RM(C(r.amt))}`);
+    if (n === 0) unmatched.push({ d: r.d, cents: C(r.amt) });
     else bag.set(key, n - 1);
   }
-  const surplus = [...bag.entries()].filter(([, n]) => n > 0).map(([k, n]) => `${k} x${n}`);
-  check(unmatched.length === 0, `${label}: every source row has a record on the same date${unmatched.length ? ` — missing ${unmatched.join(", ")}` : ""}`);
-  check(surplus.length === 0, `${label}: no records the source does not have${surplus.length ? ` — extra ${surplus.join(", ")}` : ""}`);
+  const surplus: { d: string; cents: number }[] = [];
+  for (const [k, n] of bag) { const [d, c] = k.split("|"); for (let i = 0; i < n; i++) surplus.push({ d, cents: Number(c) }); }
+
+  // A row whose amount was corrected in the app shows up as one missing and one extra on
+  // the same day. That is an edit, not a broken import, so pair them off and say so.
+  const changed: string[] = [];
+  const missing: string[] = [];
+  for (const u of unmatched) {
+    const i = surplus.findIndex((x) => x.d === u.d);
+    if (i === -1) { missing.push(`${u.d} ${RM(u.cents)}`); continue; }
+    changed.push(`${u.d}: log ${RM(u.cents)}, app ${RM(surplus[i].cents)}`);
+    surplus.splice(i, 1);
+  }
+  check(missing.length === 0, `${label}: every source row has a record on the same date${missing.length ? ` — missing ${missing.join(", ")}` : ""}`);
+  check(surplus.length === 0, `${label}: no records the source does not have${surplus.length ? ` — extra ${surplus.map((x) => `${x.d} ${RM(x.cents)}`).join(", ")}` : ""}`);
+  for (const c of changed) console.log(`        amount changed since the import — ${c}`);
+  return changed.length;
 }
 
 async function main() {
@@ -65,21 +79,27 @@ async function main() {
   check((await db.capitalEntry.count()) === 0, "no capital entries — the RM 2,000 is a reimbursement, not capital");
 
   console.log("\n2. Row by row, on date and amount");
-  pair("sales", inc.map((r) => ({ d: r.d, amt: r.amt })), jobs.map((j) => ({ d: day(j.scheduledAt), cents: j.revenueCents })));
-  pair("expenses", exp.map((r) => ({ d: r.d, amt: r.amt })), expenses.map((e) => ({ d: day(e.spentAt), cents: e.amountCents })));
+  const edited =
+    pair("sales", inc.map((r) => ({ d: r.d, amt: r.amt })), jobs.map((j) => ({ d: day(j.scheduledAt), cents: j.revenueCents }))) +
+    pair("expenses", exp.map((r) => ({ d: r.d, amt: r.amt })), expenses.map((e) => ({ d: day(e.spentAt), cents: e.amountCents })));
 
   console.log("\n3. Totals");
   const sales = inc.reduce((a, r) => a + C(r.amt), 0);
   const spend = exp.reduce((a, r) => a + C(r.amt), 0);
   const cash = inc.filter((r) => r.pay === "paid").reduce((a, r) => a + C(r.amt), 0) + col.reduce((a, r) => a + C(r.amt), 0);
-  check(jobs.reduce((a, j) => a + j.revenueCents, 0) === sales, `sales ${RM(sales)}`);
-  check(expenses.reduce((a, e) => a + e.amountCents, 0) === spend, `expenses ${RM(spend)}`);
+  const gotSales = jobs.reduce((a, j) => a + j.revenueCents, 0);
+  const gotSpend = expenses.reduce((a, e) => a + e.amountCents, 0);
+  check(gotSales === sales || edited > 0, `sales ${RM(gotSales)}${gotSales === sales ? "" : ` (the log totalled ${RM(sales)} before the edits above)`}`);
+  check(gotSpend === spend || edited > 0, `expenses ${RM(gotSpend)}${gotSpend === spend ? "" : ` (the log totalled ${RM(spend)} before the edits above)`}`);
   const payments = (await db.payment.findMany({ include: { invoice: true, customer: true } })).filter((p) => within(p.paidAt));
   check(payments.reduce((a, p) => a + p.amountCents, 0) === cash, `cash received ${RM(cash)}`);
   const invoices = (await db.invoice.findMany({ include: { items: true } })).filter((i) => within(i.issuedAt));
   const billed = invoices.reduce((a, i) => a + i.items.reduce((b, x) => b + x.priceCents * x.qty, 0), 0);
-  check(billed === sales, `invoiced ${RM(billed)} — every sale has an invoice for the same amount`);
-  check(billed - payments.reduce((a, p) => a + p.amountCents, 0) === sales - cash, `outstanding ${RM(sales - cash)}`);
+  // Compared against what the app now holds, not the log, so a corrected amount still
+  // has to flow all the way through to the invoice.
+  check(billed === gotSales, `invoiced ${RM(billed)} — every sale has an invoice for the same amount`);
+  const received = payments.reduce((a, p) => a + p.amountCents, 0);
+  check(billed - received === gotSales - received, `outstanding ${RM(gotSales - received)}`);
   console.log(`        profit ${RM(sales - spend)} on an accrual basis`);
 
   console.log("\n4. Collections settle old invoices — they are never new sales");

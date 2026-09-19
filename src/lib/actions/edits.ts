@@ -2,7 +2,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { optionalId, nullableId, optionalText } from "../schema";
 import { defineAction, ActionError } from "../registry";
-import { totals } from "../money";
+import { totals, syncInvoiceStatus, fmt } from "../money";
 
 const ADMIN = ["OWNER", "ADMIN"] as const;
 
@@ -75,6 +75,78 @@ defineAction({
   category: "Staff", roles: [...ADMIN], requiresConfirm: true,
   input: z.object({ timeEntryId: z.string() }),
   handler: async ({ timeEntryId }) => { await db.timeEntry.delete({ where: { id: timeEntryId } }); return { deleted: timeEntryId }; },
+});
+
+/**
+ * Correcting a sale has to move three records together, or the books disagree with
+ * themselves: the booking line the customer agreed, the job's revenue that reporting
+ * reads, and the invoice line they were billed. Anything already paid stays paid — the
+ * invoice simply falls back to PARTIAL when the new price is higher than what came in.
+ */
+defineAction({
+  name: "jobs.setPrice",
+  description: "Correct what a job is charged at when the amount was recorded wrongly. Updates the booking line, the job's revenue and the invoice together, and puts the invoice back to PAID/PARTIAL/SENT depending on what has been received. Admin only.",
+  category: "Jobs", roles: [...ADMIN], requiresConfirm: true,
+  input: z.object({ jobId: z.string(), amountCents: z.number().int().min(0) }),
+  handler: async ({ jobId, amountCents }) => {
+    const job = await db.job.findUnique({ where: { id: jobId },
+      include: { booking: { include: { items: true } }, invoice: { include: { items: true, payments: true } }, customer: true } });
+    if (!job) throw new ActionError("Job not found");
+
+    // One price can only be applied to one line. A multi-service job has to be repriced
+    // service by service on the booking, otherwise we would silently drop a line.
+    if (job.booking && job.booking.items.length > 1)
+      throw new ActionError(`${job.ref} covers ${job.booking.items.length} services. Edit the prices on booking ${job.booking.ref} instead, so each service keeps its own amount.`);
+    if (job.invoice && job.invoice.items.length > 1)
+      throw new ActionError(`Invoice ${job.invoice.ref} has ${job.invoice.items.length} lines. Edit it directly so each line keeps its own amount.`);
+
+    const was = job.revenueCents;
+    await db.job.update({ where: { id: jobId }, data: { revenueCents: amountCents } });
+    if (job.booking?.items[0]) await db.bookingItem.update({ where: { id: job.booking.items[0].id }, data: { priceCents: amountCents, qty: 1 } });
+    if (job.invoice?.items[0]) await db.invoiceItem.update({ where: { id: job.invoice.items[0].id }, data: { priceCents: amountCents, qty: 1 } });
+    if (job.invoiceId) await syncInvoiceStatus(db, job.invoiceId);
+
+    const inv = job.invoiceId ? await db.invoice.findUnique({ where: { id: job.invoiceId }, include: { payments: true } }) : null;
+    const paid = inv?.payments.reduce((a, p) => a + (p.isRefund ? -p.amountCents : p.amountCents), 0) ?? 0;
+    return { ref: job.ref, customer: job.customer.name, wasCents: was, nowCents: amountCents,
+      invoice: inv ? { ref: inv.ref, status: inv.status, paidCents: paid, outstandingCents: amountCents - paid } : null,
+      summary: `${job.ref} ${fmt(was)} -> ${fmt(amountCents)}` };
+  },
+});
+
+/**
+ * Attribution fixes. The money never moves; it just belongs to a different name, so
+ * every record that carries the customer has to move at once or the customer pages
+ * disagree with each other.
+ */
+defineAction({
+  name: "jobs.reassignCustomer",
+  description: "Move a job to a different customer when it was filed under the wrong name. Moves the booking, job, invoice and any payments together, and re-points the address at the new customer's primary one. Nothing about the amount changes.",
+  category: "Jobs", roles: [...ADMIN], requiresConfirm: true,
+  input: z.object({ jobId: z.string(), customerId: z.string(), addressId: optionalId().describe("Defaults to the new customer's primary address") }),
+  handler: async ({ jobId, customerId, addressId }) => {
+    const job = await db.job.findUnique({ where: { id: jobId }, include: { customer: true, booking: true } });
+    if (!job) throw new ActionError("Job not found");
+    const to = await db.customer.findUnique({ where: { id: customerId }, include: { addresses: true } });
+    if (!to) throw new ActionError("That customer does not exist. Look them up first.");
+    if (job.customerId === customerId) throw new ActionError(`${job.ref} is already filed under ${to.name}.`);
+
+    // The old address belongs to the old customer, so it cannot come along.
+    const addr = addressId
+      ? to.addresses.find((a) => a.id === addressId) ?? null
+      : to.addresses.find((a) => a.isPrimary) ?? to.addresses[0] ?? null;
+    if (addressId && !addr) throw new ActionError("That address does not belong to the customer you are moving the job to.");
+
+    const from = job.customer.name;
+    await db.job.update({ where: { id: jobId }, data: { customerId, addressId: addr?.id ?? null } });
+    if (job.bookingId) await db.booking.update({ where: { id: job.bookingId }, data: { customerId, addressId: addr?.id ?? null } });
+    let payments = 0;
+    if (job.invoiceId) {
+      await db.invoice.update({ where: { id: job.invoiceId }, data: { customerId } });
+      payments = (await db.payment.updateMany({ where: { invoiceId: job.invoiceId }, data: { customerId } })).count;
+    }
+    return { ref: job.ref, from, to: to.name, address: addr?.line1 ?? null, paymentsMoved: payments };
+  },
 });
 
 /* -------------------------------- Quotes ---------------------------------- */
@@ -181,13 +253,7 @@ defineAction({
     const p = await db.payment.findUnique({ where: { id: paymentId }, include: { invoice: { include: { items: true, payments: true } } } });
     if (!p) throw new ActionError("Payment not found");
     await db.payment.delete({ where: { id: paymentId } });
-    if (p.invoiceId && p.invoice) {
-      const rest = p.invoice.payments.filter((x) => x.id !== paymentId);
-      const t = totals(p.invoice.items, p.invoice.discountCents, p.invoice.taxRateBp);
-      const paid = rest.reduce((a, x) => a + (x.isRefund ? -x.amountCents : x.amountCents), 0);
-      await db.invoice.update({ where: { id: p.invoiceId },
-        data: { status: paid <= 0 ? "SENT" : paid >= t.total ? "PAID" : "PARTIAL" } });
-    }
+    if (p.invoiceId) await syncInvoiceStatus(db, p.invoiceId);
     return { deleted: p.ref, amountCents: p.amountCents };
   },
 });
@@ -200,19 +266,28 @@ defineAction({
   category: "Expenses", roles: [...ADMIN],
   input: z.object({
     expenseId: z.string(), amountCents: z.number().int().min(1).optional(),
-    categoryName: optionalText(), vendor: z.string().optional(), note: z.string().optional(),
+    categoryName: optionalText(), vendor: z.string().nullish(), note: z.string().nullish(),
     spentAt: z.string().optional(), jobId: nullableId(),
+    staffId: nullableId().describe("Who paid it out of their own pocket. Pass null for money that came straight out of business cash. Moving an expense to a different person clears its reimbursed tick, because the tick recorded a repayment to the previous person."),
     reimbursable: z.boolean().optional(),
   }),
-  handler: async ({ expenseId, categoryName, spentAt, ...rest }) => {
+  handler: async ({ expenseId, categoryName, spentAt, staffId, ...rest }) => {
+    const e = await db.expense.findUnique({ where: { id: expenseId } });
+    if (!e) throw new ActionError("Expense not found");
     let categoryId: string | undefined;
     if (categoryName) {
       const c = await db.expenseCategory.upsert({ where: { name: categoryName }, update: {}, create: { name: categoryName } });
       categoryId = c.id;
     }
+    // A reimbursed tick says "this person has been paid back for this row". It cannot
+    // follow the row to somebody else, who may never have been paid anything.
+    const movedPayer = staffId !== undefined && staffId !== e.staffId;
     return db.expense.update({ where: { id: expenseId },
-      data: { ...rest, ...(categoryId ? { categoryId } : {}), ...(spentAt ? { spentAt: new Date(spentAt) } : {}) },
-      include: { category: true } });
+      data: { ...rest, ...(categoryId ? { categoryId } : {}),
+        ...(spentAt ? { spentAt: new Date(spentAt) } : {}),
+        ...(staffId === undefined ? {} : { staffId, reimbursable: rest.reimbursable ?? !!staffId }),
+        ...(movedPayer ? { reimbursed: false } : {}) },
+      include: { category: true, staff: true } });
   },
 });
 

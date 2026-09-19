@@ -13,7 +13,7 @@ function BookingsInner() {
   const sp = useSearchParams();
   const [open, setOpen] = useState(sp.get("new") === "1");
   const [status, setStatus] = useState("");
-  const [scope, setScope] = useState<"upcoming" | "all">("upcoming");
+  const [scope, setScope] = useState<"upcoming" | "all">("all");
 
   const { data, loading, refresh } = useAction<any[]>("bookings.list", {
     ...(status ? { status } : {}),

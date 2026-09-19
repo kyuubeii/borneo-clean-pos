@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Money, Empty, Modal, Field, callAction, toast, Stat } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
@@ -12,6 +12,7 @@ export default function Expenses() {
   const t = useT();
   const [days, setDays] = useState(30);
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<any>(null);
   const from = isoDate(addDays(new Date(), -days));
   const isStaff = useIsStaff();
   const { data, loading, refresh } = useAction<any[]>("expenses.list", { from, limit: 200 });
@@ -30,6 +31,7 @@ export default function Expenses() {
     try { await callAction("expenses.markReimbursed", { expenseId: id }); toast("Marked reimbursed"); refresh(); advances.refresh(); }
     catch (e: any) { toast(e.message, "err"); }
   }
+  const reloadAll = () => { refresh(); advances.refresh(); breakdown.refresh(); };
 
   return (
     <div>
@@ -77,12 +79,18 @@ export default function Expenses() {
                       </td>
                       <td className="td text-ink-500">{e.jobRef ?? "—"}</td>
                       <td className="td text-right font-medium"><Money cents={e.amountCents} /></td>
-                      <td className="td text-right">
-                        {e.reimbursable && (e.reimbursed
-                          ? <span className="badge bg-emerald-50 text-emerald-600">Reimbursed</span>
-                          : isStaff
-                            ? <span className="badge bg-amber-50 text-amber-700">{t("staff.awaitingReimb")}</span>
-                            : <button onClick={() => reimburse(e.id)} className="btn-outline btn-sm">Reimburse {e.staff ? e.staff.split(" ")[0] : ""}</button>)}
+                      <td className="td">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {e.reimbursable && (e.reimbursed
+                            ? <span className="badge bg-emerald-50 text-emerald-600">Reimbursed</span>
+                            : isStaff
+                              ? <span className="badge bg-amber-50 text-amber-700">{t("staff.awaitingReimb")}</span>
+                              : <button onClick={() => reimburse(e.id)} className="btn-outline btn-sm">Reimburse {e.staff ? e.staff.split(" ")[0] : ""}</button>)}
+                          {!isStaff && <button onClick={() => setEditing(e)} aria-label={`Edit ${e.ref}`} title="Edit"
+                            className="btn-outline btn-sm px-2 text-ink-500">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                          </button>}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -135,21 +143,50 @@ export default function Expenses() {
         </div>}
       </div>
 
-      <ExpenseForm open={open} onClose={() => setOpen(false)} onDone={() => { refresh(); breakdown.refresh(); }} />
+      <ExpenseForm open={open} onClose={() => setOpen(false)} onDone={reloadAll} />
+      <ExpenseForm open={!!editing} expense={editing} onClose={() => setEditing(null)} onDone={reloadAll} />
     </div>
   );
 }
 
-function ExpenseForm({ open, onClose, onDone }: any) {
+/** Records a new expense, or edits an existing one when `expense` is passed. */
+function ExpenseForm({ open, onClose, onDone, expense }: any) {
   const t = useT();
+  const editing = !!expense;
   const cats = useAction<any[]>("expenses.categories", {});
-  const jobs = useAction<any[]>("jobs.list", { from: isoDate(addDays(new Date(), -14)), to: isoDate(addDays(new Date(), 7)), limit: 50 });
+  // An old expense can be linked to an old job, so the list has to reach back far enough
+  // to still contain it rather than quietly dropping the link on save.
+  const jobFrom = expense ? isoDate(addDays(new Date(expense.spentAt), -60)) : isoDate(addDays(new Date(), -14));
+  const jobs = useAction<any[]>("jobs.list", { from: jobFrom, to: isoDate(addDays(new Date(), 7)), limit: 200 });
   const staff = useAction<any[]>("staff.list", {});
-  const [f, setF] = useState<any>({ amount: "", categoryName: "Fuel", vendor: "", note: "", jobId: "", staffId: "", reimbursable: false, spentAt: isoDate(new Date()) });
+  const blank = { amount: "", categoryName: "Fuel", vendor: "", note: "", jobId: "", staffId: "", reimbursable: false, spentAt: isoDate(new Date()) };
+  const [f, setF] = useState<any>(blank);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const set = (k: string) => (e: any) => setF({ ...f, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
+
+  // Refill whenever a different row is opened, so the form never shows the last one's values.
+  const loaded = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) { loaded.current = null; return; }
+    const key = expense?.id ?? "new";
+    if (loaded.current === key) return;
+    loaded.current = key;
+    setF(expense ? {
+      amount: (expense.amountCents / 100).toFixed(2), categoryName: expense.category === "Uncategorised" ? "" : expense.category,
+      vendor: expense.vendor ?? "", note: expense.note ?? "", jobId: expense.jobId ?? "",
+      staffId: expense.staffId ?? "", reimbursable: expense.reimbursable, spentAt: isoDate(new Date(expense.spentAt)),
+    } : blank);
+    setReceipt(expense?.receiptUrl ?? null);
+  }, [open, expense]);
+
+  async function remove() {
+    if (!confirm(`Delete ${expense.ref} for RM ${(expense.amountCents / 100).toFixed(2)}? This cannot be undone.`)) return;
+    setBusy(true);
+    try { await callAction("expenses.delete", { expenseId: expense.id }); toast("Expense deleted"); onDone(); onClose(); }
+    catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  }
 
   async function upload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]; if (!file) return;
@@ -163,20 +200,31 @@ function ExpenseForm({ open, onClose, onDone }: any) {
     if (!f.amount) return toast("Enter an amount", "err");
     setBusy(true);
     try {
-      await callAction("expenses.record", {
-        amountCents: toCents(f.amount), categoryName: f.categoryName || undefined,
-        vendor: f.vendor || undefined, note: f.note || undefined,
-        jobId: f.jobId || undefined, staffId: f.staffId || undefined,
-        spentAt: new Date(f.spentAt).toISOString(), reimbursable: f.reimbursable,
-        receiptUrl: receipt ?? undefined,
-      });
-      toast("Expense recorded"); onDone(); onClose();
-      setF({ ...f, amount: "", vendor: "", note: "", jobId: "" }); setReceipt(null);
+      if (editing) {
+        // Blank fields are sent as empty strings, not omitted, so clearing a vendor or a
+        // note in the form actually clears it on the record.
+        await callAction("expenses.update", {
+          expenseId: expense.id, amountCents: toCents(f.amount), categoryName: f.categoryName || undefined,
+          vendor: f.vendor || null, note: f.note || null, jobId: f.jobId || null, staffId: f.staffId || null,
+          spentAt: new Date(f.spentAt).toISOString(), reimbursable: f.reimbursable,
+        });
+        toast("Expense updated"); onDone(); onClose();
+      } else {
+        await callAction("expenses.record", {
+          amountCents: toCents(f.amount), categoryName: f.categoryName || undefined,
+          vendor: f.vendor || undefined, note: f.note || undefined,
+          jobId: f.jobId || undefined, staffId: f.staffId || undefined,
+          spentAt: new Date(f.spentAt).toISOString(), reimbursable: f.reimbursable,
+          receiptUrl: receipt ?? undefined,
+        });
+        toast("Expense recorded"); onDone(); onClose();
+        setF({ ...f, amount: "", vendor: "", note: "", jobId: "" }); setReceipt(null);
+      }
     } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Record expense">
+    <Modal open={open} onClose={onClose} title={editing ? `Edit ${expense.ref}` : "Record expense"}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
           <Field label={`${t("common.amount")} (RM)`}><input className="input" inputMode="decimal" value={f.amount} onChange={set("amount")} placeholder="120.00" /></Field>
@@ -211,8 +259,15 @@ function ExpenseForm({ open, onClose, onDone }: any) {
         <label className="flex items-center gap-2 text-sm text-ink-600">
           <input type="checkbox" checked={f.reimbursable} onChange={set("reimbursable")} /> Reimbursable to staff
         </label>
-        <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
-          <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : "Record"}</button></div>
+        {editing && expense.reimbursed && <p className="rounded-lg bg-amber-50 p-2.5 text-[11px] text-amber-900">
+          This row is marked reimbursed. Changing who paid it clears that tick, because it recorded a repayment to {expense.staff}.</p>}
+        <div className="flex items-center justify-between gap-2">
+          {editing
+            ? <button onClick={remove} disabled={busy} className="btn-outline btn-sm text-red-600">Delete</button>
+            : <span />}
+          <div className="flex gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
+            <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : editing ? t("common.save") : "Record"}</button></div>
+        </div>
       </div>
     </Modal>
   );

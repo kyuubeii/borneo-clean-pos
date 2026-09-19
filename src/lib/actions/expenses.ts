@@ -21,9 +21,10 @@ defineAction({
         ...(from || to ? { spentAt: { ...(from ? { gte: startOfDay(new Date(from)) } : {}), ...(to ? { lte: endOfDay(new Date(to)) } : {}) } } : {}) },
       orderBy: { spentAt: "desc" }, take: limit, include: { category: true, job: true, staff: true },
     });
+    // The ids come back as well as the names so an edit form can be filled in from the list.
     return rows.map((e) => ({ id: e.id, ref: e.ref, amountCents: e.amountCents, spentAt: e.spentAt,
-      category: e.category?.name ?? "Uncategorised", vendor: e.vendor, note: e.note,
-      jobRef: e.job?.ref ?? null, staff: e.staff?.name ?? null,
+      category: e.category?.name ?? "Uncategorised", categoryId: e.categoryId, vendor: e.vendor, note: e.note,
+      jobId: e.jobId, jobRef: e.job?.ref ?? null, staffId: e.staffId, staff: e.staff?.name ?? null,
       reimbursable: e.reimbursable, reimbursed: e.reimbursed, receiptUrl: e.receiptUrl }));
   },
 });
