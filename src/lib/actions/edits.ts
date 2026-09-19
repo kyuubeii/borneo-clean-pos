@@ -397,7 +397,18 @@ defineAction({
     await db.auditLog.updateMany({ where: { userId }, data: { userId: null } });
     await db.notification.deleteMany({ where: { userId } });
     await db.user.delete({ where: { id: userId } });
-    return { deleted: u.email, name: u.name, role: u.role, unlinkedStaff: u.staff?.name ?? null };
+    // Remove the credentials too, otherwise the address stays taken and the
+    // account could still authenticate even though the app no longer knows it.
+    let credentialsLeft = false;
+    if (u.authUserId) {
+      const { deleteAuthUser } = await import("../supabase/admin");
+      credentialsLeft = !(await deleteAuthUser(u.authUserId));
+    }
+    return {
+      deleted: u.email, name: u.name, role: u.role,
+      unlinkedStaff: u.staff?.name ?? null,
+      ...(credentialsLeft ? { warning: `The sign-in record for ${u.email} could not be removed. Delete it in Supabase.` } : {}),
+    };
   },
 });
 
@@ -407,8 +418,13 @@ defineAction({
   category: "Admin", roles: ["OWNER"], requiresConfirm: true,
   input: z.object({ userId: z.string(), newPassword: z.string().min(6) }),
   handler: async ({ userId, newPassword }) => {
-    const { hashPassword } = await import("../auth");
-    const u = await db.user.update({ where: { id: userId }, data: { password: hashPassword(newPassword) } });
+    const u = await db.user.findUnique({ where: { id: userId } });
+    if (!u) throw new ActionError("User not found");
+    if (!u.authUserId) {
+      throw new ActionError(`${u.email} has no sign-in record yet. Recreate the account so it gets one.`);
+    }
+    const { setAuthPassword } = await import("../supabase/admin");
+    await setAuthPassword(u.authUserId, newPassword);
     return { updated: u.email };
   },
 });

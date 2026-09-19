@@ -15,6 +15,12 @@ model User {
   id        String   @id @default(cuid())
   email     String   @unique
   name      String
+  // Supabase Auth owns credentials. This links the app's user record to the
+  // auth.users row; matching on email would be fragile, since the two systems
+  // normalise case differently and the address can change.
+  authUserId String? @unique
+  // Legacy sha256 hash. No longer read at sign-in -- kept so the previous
+  // login path still works if the Supabase migration has to be rolled back.
   password  String
   role      String   @default("STAFF") // OWNER | ADMIN | STAFF
   active    Boolean  @default(true)

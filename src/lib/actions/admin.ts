@@ -2,7 +2,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
-import { hashPassword } from "../auth";
+import { createAuthUser, deleteAuthUser } from "../supabase/admin";
 
 defineAction({
   name: "settings.get",
@@ -53,9 +53,25 @@ defineAction({
   handler: async (i) => {
     const email = i.email.toLowerCase().trim();
     if (await db.user.findUnique({ where: { email } })) throw new ActionError("That email is already in use");
-    const u = await db.user.create({ data: { name: i.name, email, password: hashPassword(i.password), role: i.role } });
-    if (i.staffId) await db.staff.update({ where: { id: i.staffId }, data: { userId: u.id } });
-    return { id: u.id, name: u.name, email: u.email, role: u.role };
+
+    // Supabase holds the credentials, this table holds the role. If the second
+    // write fails the first is undone, otherwise the orphaned auth account
+    // would reserve the address and block every retry.
+    const authUserId = await createAuthUser(email, i.password);
+    try {
+      const u = await db.user.create({
+        data: { name: i.name, email, password: "", authUserId, role: i.role },
+      });
+      if (i.staffId) await db.staff.update({ where: { id: i.staffId }, data: { userId: u.id } });
+      return { id: u.id, name: u.name, email: u.email, role: u.role };
+    } catch (e) {
+      const cleaned = await deleteAuthUser(authUserId);
+      throw new ActionError(
+        cleaned
+          ? `Could not create the account: ${(e as Error).message}`
+          : `Could not create the account, and the sign-in record for ${email} was left behind. Remove it in Supabase before retrying.`,
+      );
+    }
   },
 });
 
