@@ -5,10 +5,26 @@
  * both databases can be open at once, and writes through the normal client.
  * Rows keep their existing ids, so every foreign key still points where it did.
  *
+ * The SQLite client is not built by `postinstall`, which only generates the
+ * default schema, so generate it first:
+ *
+ *   npx prisma generate --schema prisma/sqlite.prisma
  *   SQLITE_URL="file:./prisma/dev.db" DATABASE_URL="postgresql://..." \
  *     npx tsx scripts/migrate-to-postgres.ts
  *
  * Refuses to run if the target already holds data, unless --force is passed.
+ *
+ * AFTERWARDS, RESET THE OWNER PASSWORD. hashPassword() in src/lib/auth.ts
+ * salts with SESSION_SECRET, and these rows were hashed against the fallback
+ * value because SESSION_SECRET was never set locally. Once a real secret is
+ * set in production the stored hash no longer matches anything, and the only
+ * account cannot sign in. Row counts will still match -- this script cannot
+ * detect it. With the production SESSION_SECRET and DATABASE_URL set:
+ *
+ *   npm run user:password -- <email> <new-password>
+ *
+ * Do not work around this by setting SESSION_SECRET to the fallback string:
+ * it is committed in this repository, and it also signs session cookies.
  */
 import { PrismaClient as SqliteClient } from ".prisma-sqlite/client";
 import { PrismaClient as PgClient } from "@prisma/client";
