@@ -1,13 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
+import { storage, storageConfigured, BUCKET } from "@/lib/storage";
 import crypto from "crypto";
 
-/** Local disk storage under /public/uploads — no object store in v1. */
+/** Job photos and expense receipts, stored in Supabase Storage. */
 export async function POST(req: NextRequest) {
   const user = await getUser();
   if (!user) return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
+
+  if (!storageConfigured()) {
+    return NextResponse.json(
+      { ok: false, error: "File storage is not configured on this server." },
+      { status: 503 },
+    );
+  }
+
   const form = await req.formData();
   const file = form.get("file") as File | null;
   if (!file) return NextResponse.json({ ok: false, error: "No file" }, { status: 400 });
@@ -15,8 +22,16 @@ export async function POST(req: NextRequest) {
 
   const ext = (file.name.split(".").pop() ?? "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
   const name = `${crypto.randomBytes(8).toString("hex")}.${ext}`;
-  const dir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, name), Buffer.from(await file.arrayBuffer()));
-  return NextResponse.json({ ok: true, url: `/uploads/${name}` });
+
+  const { error } = await storage!.from(BUCKET).upload(name, file, {
+    contentType: file.type || "application/octet-stream",
+    upsert: false,
+  });
+  if (error) {
+    console.error("upload failed", error);
+    return NextResponse.json({ ok: false, error: "Upload failed" }, { status: 502 });
+  }
+
+  const { data } = storage!.from(BUCKET).getPublicUrl(name);
+  return NextResponse.json({ ok: true, url: data.publicUrl });
 }

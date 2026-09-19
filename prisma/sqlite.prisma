@@ -1,10 +1,13 @@
-generator client {
+// Read-only mirror of schema.prisma, kept on SQLite so the one-off migration
+// script can read the old dev.db while the app itself runs on Postgres.
+generator sqliteClient {
   provider = "prisma-client-js"
+  output   = "../node_modules/.prisma-sqlite/client"
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = env("SQLITE_URL")
 }
 
 model User {
