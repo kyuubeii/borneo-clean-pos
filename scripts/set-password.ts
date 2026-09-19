@@ -9,17 +9,16 @@
  *
  * Prompts for the password without echoing it.
  *
- * hashPassword() in src/lib/auth.ts salts with SESSION_SECRET, so a hash is
- * only valid where that same secret is set. This script reads .env and refuses
- * to run when SESSION_SECRET is missing. Falling back to the default is worse
- * than an error: it writes a hash that works locally and fails in production,
- * and nothing looks wrong until someone tries to sign in.
+ * Credentials live in Supabase Auth, so this writes there, not to the User
+ * table -- the password column is legacy and no longer consulted at sign-in.
+ * Changing the login address updates both sides, since they are linked by
+ * authUserId rather than by email.
  */
 import { PrismaClient } from "@prisma/client";
-import crypto from "crypto";
 import { readFileSync, existsSync } from "fs";
 import { createInterface } from "readline";
 import { Writable } from "stream";
+import { createClient } from "@supabase/supabase-js";
 
 /** Minimal .env reader — the project has no dotenv dependency. */
 function loadEnv(path = ".env") {
@@ -34,10 +33,7 @@ function loadEnv(path = ".env") {
 }
 loadEnv();
 
-const SECRET = process.env.SESSION_SECRET;
 const db = new PrismaClient();
-// Must match hashPassword() in src/lib/auth.ts.
-const hash = (p: string) => crypto.createHash("sha256").update(p + SECRET).digest("hex");
 
 /**
  * Reads a line with the echo suppressed. readline echoes through its output
@@ -71,28 +67,37 @@ async function main() {
   const [email, argPassword] = positional;
 
   if (!email) throw new Error("Usage: npm run user:password -- <email> [--email <new-login-email>]");
-  if (!SECRET) {
-    throw new Error(
-      "SESSION_SECRET is not set (checked the environment and .env).\n" +
-        "Set it to the value the deployed app uses, or the new password will not work there.",
-    );
+
+  const url = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !serviceKey) {
+    throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set (checked the environment and .env).");
   }
 
   const user = await db.user.findUnique({ where: { email: email.toLowerCase().trim() } });
-  if (!user) throw new Error(`No user with email ${email}`);
+  if (!user) throw new Error(`No app user with email ${email}`);
+  if (!user.authUserId) {
+    throw new Error(
+      `${user.email} has no Supabase sign-in record.\n` +
+        `Create one first:  npx tsx scripts/link-supabase-auth.ts ${user.email} <password>`,
+    );
+  }
 
   const password = argPassword || (await askHidden("New password: "));
   if (password.length < 6) throw new Error("Password must be at least 6 characters");
 
-  const data: { password: string; active: boolean; email?: string } = {
-    password: hash(password),
-    active: true,
-  };
-  if (newEmail) data.email = newEmail.toLowerCase().trim();
+  const admin = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } });
+  const { error } = await admin.auth.admin.updateUserById(user.authUserId, {
+    password,
+    ...(newEmail ? { email: newEmail.toLowerCase().trim(), email_confirm: true } : {}),
+  });
+  if (error) throw new Error(error.message);
 
-  const updated = await db.user.update({ where: { id: user.id }, data });
+  const updated = newEmail
+    ? await db.user.update({ where: { id: user.id }, data: { email: newEmail.toLowerCase().trim(), active: true } })
+    : await db.user.update({ where: { id: user.id }, data: { active: true } });
+
   console.log(`Password updated for ${updated.name} <${updated.email}> (${updated.role}). The account is active.`);
-  console.log(`Hashed with the SESSION_SECRET ending ...${SECRET.slice(-4)}; the deployment must use the same one.`);
 }
 
-main().catch((e) => { console.error(e.message); process.exitCode = 1; }).finally(() => db.$disconnect());
+main().catch((e) => { console.error(e.message ?? e); process.exitCode = 1; }).finally(() => db.$disconnect());

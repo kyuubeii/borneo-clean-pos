@@ -1,11 +1,9 @@
 "use client";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { useT, LocaleToggle } from "@/components/I18nProvider";
 
 export default function Login() {
   const t = useT();
-  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [err, setErr] = useState("");
@@ -17,8 +15,11 @@ export default function Login() {
     const r = await fetch("/api/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email, password }) });
     setBusy(false);
     if (!r.ok) return setErr(t("auth.invalid"));
-    router.push("/dashboard");
-    router.refresh();
+    // A full navigation rather than router.push: signing in changes what the
+    // server will render, and the client router would otherwise serve the
+    // /dashboard entry it cached while nobody was signed in -- which bounces
+    // straight back here and looks like the password was wrong.
+    window.location.assign("/dashboard");
   }
 
   return (

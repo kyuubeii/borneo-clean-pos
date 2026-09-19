@@ -61,30 +61,35 @@ Set these environment variables **before** the first deploy:
 | --- | --- |
 | `DATABASE_URL` | pooled string, port 6543 |
 | `DIRECT_URL` | direct string, port 5432 |
-| `SESSION_SECRET` | `openssl rand -base64 32` — see the warning below |
+| `SESSION_SECRET` | legacy; only salts the unused `User.password` column |
+| `NEXT_PUBLIC_SUPABASE_URL` | `https://<ref>.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | the publishable key (this one is meant to be public) |
 | `SUPABASE_URL` | `https://<ref>.supabase.co` |
 | `SUPABASE_SERVICE_ROLE_KEY` | the **rotated** key |
 | `SUPABASE_BUCKET` | `uploads` |
 | `OPENROUTER_API_KEY` | optional; the assistant is disabled without it |
 
-### Setting SESSION_SECRET will lock you out until you reset the password
+### Accounts
 
-`hashPassword()` in `src/lib/auth.ts` salts passwords with `SESSION_SECRET`.
-The migrated user row was hashed against the fallback string, because
-`SESSION_SECRET` was never set locally. The moment production uses a real
-secret, the stored hash matches nothing and the only account cannot sign in.
-The migration script cannot detect this — row counts still match.
+Sign-in is Supabase Auth. The app's `User` table still holds the role, the
+name and the staff link, joined to `auth.users` on `authUserId` — not on
+email, because the two systems normalise case differently and the address can
+change.
 
-After the first deploy, with the production `SESSION_SECRET` and `DATABASE_URL`
-in your local `.env`:
+`User.password` and `SESSION_SECRET` are legacy. Nothing reads them at
+sign-in; they are kept so the previous login path still works if this has to
+be rolled back, and can be dropped once Supabase Auth has proven itself.
+
+Giving an existing app user a Supabase account, or resetting a password when
+nobody can get in:
 
 ```bash
-npm run user:password -- <email> <new-password>
+npx tsx scripts/link-supabase-auth.ts <email> <initial-password>   # first time
+npm run user:password -- <email>                                   # afterwards
 ```
 
-Do not avoid this by setting `SESSION_SECRET` to the fallback value. It is
-committed in this repository, and it also signs session cookies — anyone could
-forge one.
+Both are safe to re-run: an existing auth account is reused rather than
+duplicated, so a failed attempt does not leave an orphan holding the address.
 
 ---
 
@@ -140,6 +145,11 @@ account, which is a browser flow.
 - `next.config.mjs` sends build output to `.next-build` locally so a build
   cannot clobber a running dev server, and to `.next` on Vercel where the
   platform expects it.
-- Password hashing is unsalted SHA-256. It is adequate against a database leak
-  only because the secret is not in the database, but bcrypt or argon2 would be
-  the right thing if this ever holds more accounts.
+- `src/middleware.ts` refreshes the Supabase session and does nothing else.
+  It has to exist: Server Components cannot set cookies, so without a request
+  that can, access tokens would expire and never be replaced. Authorisation
+  stays in the action registry, where it can see what is being asked — putting
+  access decisions in middleware is how the Next.js auth-bypass advisories
+  became exploitable elsewhere.
+- Supabase stores passwords with bcrypt, so the old unsalted SHA-256 hashing
+  is no longer on the sign-in path.
