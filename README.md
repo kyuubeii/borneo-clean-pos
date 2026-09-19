@@ -17,6 +17,26 @@ npm run seed        # load ~4 months of realistic demo data
 npm run dev         # http://localhost:3100
 ```
 
+### Starting fresh
+
+```bash
+npm run reset -- --yes
+```
+
+Clears every operational record — customers, bookings, jobs, invoices, payments,
+expenses, quotes, payouts, notifications, the audit log, chat threads and uploaded
+files — and blanks the business profile so you can enter your own. The service
+catalogue and expense categories are kept as a starting template.
+
+- `--all` also clears the service catalogue and expense categories
+- `--keep-profile` keeps the business name, address, phone and invoice footer
+
+**Always kept:** user accounts, so a reset can never lock you out, and the OpenRouter
+API key and model, which are credentials rather than business data. The script refuses
+to run without `--yes`.
+
+To reload the demo dataset instead, run `npm run seed`.
+
 ### Demo accounts
 
 | Email | Password | Role | Sees |
