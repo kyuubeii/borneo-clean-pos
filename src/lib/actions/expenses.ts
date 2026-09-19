@@ -70,13 +70,10 @@ defineAction({
       const mine = await db.expense.findMany({ where: { staffId: e.staffId } });
       const advanced = mine.reduce((a, x) => a + x.amountCents, 0);
       const settled = mine.filter((x) => x.reimbursed).reduce((a, x) => a + x.amountCents, 0);
-      const repaid = (await db.payout.findMany({ where: { staffId: e.staffId, kind: "REIMBURSEMENT", status: "PAID" } }))
-        .reduce((a, p) => a + p.amountCents, 0);
-      const owed = advanced - settled - repaid;
-      if (e.amountCents > owed) {
+      if (settled + e.amountCents > advanced) {
         const rm = (c: number) => `RM ${(c / 100).toFixed(2)}`;
         throw new Error(
-          `That would pay back more than is owed. ${rm(advanced)} was advanced, ${rm(settled)} is already marked reimbursed and ${rm(repaid)} was paid on account, leaving ${rm(owed)} outstanding — less than this ${rm(e.amountCents)} expense. The money is already accounted for.`);
+          `That would mark more as repaid than was ever advanced: ${rm(settled)} of ${rm(advanced)} is already ticked, and this row is ${rm(e.amountCents)}.`);
       }
     }
     return db.expense.update({ where: { id: expenseId }, data: { reimbursed: true } });
@@ -101,7 +98,7 @@ defineAction({
 
 defineAction({
   name: "staff.advances",
-  description: "What the business still owes each person for expenses they paid out of their own pocket: total advanced, less anything cleared at the time, less reimbursements already paid back.",
+  description: "What the business still owes each person for expenses they paid out of their own pocket: total advanced, less what has been paid back. A reimbursement payout and a row marked reimbursed are two records of the same repayment, so the credit is the larger of the two rather than the sum.",
   category: "Expenses", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ staffId: z.string().optional() }),
   handler: async ({ staffId }, ctx) => {
@@ -113,11 +110,16 @@ defineAction({
       const adv = await db.expense.findMany({ where: { staffId: s.id } });
       if (!adv.length) continue;
       const advanced = adv.reduce((a, e) => a + e.amountCents, 0);
+      // Two records of the same repayment: the payouts are the cash that went back, and
+      // ticking a row says which advance that cash covered. Adding them would count the
+      // money twice, so the credit is the larger of the two, not the sum.
       const cleared = adv.filter((e) => e.reimbursed).reduce((a, e) => a + e.amountCents, 0);
       const repaid = (await db.payout.findMany({ where: { staffId: s.id, kind: "REIMBURSEMENT", status: "PAID" } }))
         .reduce((a, p) => a + p.amountCents, 0);
+      const credit = Math.max(cleared, repaid);
       out.push({ staffId: s.id, name: s.name, advancedCents: advanced, clearedCents: cleared,
-        repaidCents: repaid, stillOwedCents: advanced - cleared - repaid, entries: adv.length });
+        repaidCents: repaid, unallocatedCents: Math.max(0, repaid - cleared),
+        stillOwedCents: advanced - credit, entries: adv.length });
     }
     return out.sort((a, b) => b.stillOwedCents - a.stillOwedCents);
   },

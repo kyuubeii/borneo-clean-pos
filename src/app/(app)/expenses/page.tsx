@@ -104,8 +104,9 @@ export default function Expenses() {
                 <p className="mt-0.5 text-[11px] text-ink-400">
                   advanced <Money cents={x.advancedCents} /> · settled on rows <Money cents={x.clearedCents} /> · {x.entries} entries
                 </p>
-                {x.repaidCents > 0 && <p className="mt-0.5 text-[11px] text-ink-400">
-                  plus <Money cents={x.repaidCents} /> paid back on account, which is why rows it covered are not ticked
+                {x.unallocatedCents > 0 && <p className="mt-0.5 text-[11px] text-ink-400">
+                  of <Money cents={x.repaidCents} /> paid back, <Money cents={x.unallocatedCents} /> is not yet matched to rows —
+                  ticking those rows records which advance it covered and will not change what is owed
                 </p>}
               </div>
             ))}

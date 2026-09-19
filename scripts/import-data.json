@@ -55,6 +55,14 @@
   "by": "Oscar"
  },
  {
+  "d": "2026-08-04",
+  "k": "REIMBURSEMENT",
+  "amt": 45.0,
+  "to": "Jong",
+  "from": "Oscar",
+  "note": "Settled on the spot the same day \u2014 the two 04/08 rows it covers are marked reimbursed."
+ },
+ {
   "d": "2026-08-05",
   "k": "INC",
   "svc": "House Cleaning",

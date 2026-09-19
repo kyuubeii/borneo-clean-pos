@@ -115,13 +115,13 @@ async function main() {
       cleared: mine.filter((e) => e.reimbursed).reduce((a, e) => a + e.amountCents, 0),
       repaid: payouts.filter((p) => p.staffId === person.id && p.kind === "REIMBURSEMENT").reduce((a, p) => a + p.amountCents, 0),
     };
-    const owed = got.advanced - got.cleared - got.repaid;
+    const owed = got.advanced - Math.max(got.cleared, got.repaid);
     // Only `advanced` and `repaid` are import state. Marking a row reimbursed in the app is
     // ordinary day-to-day work, so `cleared` is expected to drift above the log and is
     // reported rather than asserted — otherwise honest use of the app turns the audit red.
     const agrees = (["advanced", "repaid"] as const).filter((k) => got[k] !== want[k]);
     check(agrees.length === 0 && got.cleared >= want.cleared,
-      `${person.name} advanced ${RM(got.advanced)}, settled ${RM(got.cleared)}, repaid ${RM(got.repaid)} -> still owed ${RM(owed)}`
+      `${person.name} advanced ${RM(got.advanced)}, repaid ${RM(got.repaid)}, of which ${RM(got.cleared)} is matched to rows -> still owed ${RM(owed)}`
       + (agrees.length ? ` — the log says ${agrees.map((k) => `${k} ${RM(want[k])}`).join(", ")}` : "")
       + (got.cleared < want.cleared ? ` — the log clears ${RM(want.cleared)}, the app only ${RM(got.cleared)}` : ""));
     if (got.cleared > want.cleared) {
