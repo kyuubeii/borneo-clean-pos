@@ -32,7 +32,7 @@ async function main() {
 
   // Order matters: children before parents, so foreign keys never block a delete.
   const ORDER = [
-    "chatMessage", "auditLog", "notification", "payout", "expense", "payment",
+    "chatMessage", "auditLog", "notification", "capitalEntry", "payout", "expense", "payment",
     "invoiceItem", "invoice", "quoteItem", "quote", "timeEntry", "photo",
     "checklistItem", "jobAssignment", "job", "bookingItem", "booking",
     "address", "customer", "availability", "staff",
@@ -72,6 +72,22 @@ async function main() {
   await rm(uploads, { recursive: true, force: true });
   await mkdir(uploads, { recursive: true });
   console.log("Uploaded files cleared.");
+
+  // Guard against a newly added model being forgotten here: everything except the
+  // deliberately kept tables must actually be empty once we are done.
+  const KEPT = new Set(["user", "setting", ...(clearCatalogue ? [] : ["service", "expenseCategory"])]);
+  const models = Object.keys(db).filter((k) => !k.startsWith("$") && !k.startsWith("_") && typeof (db as any)[k]?.count === "function");
+  const leftovers: string[] = [];
+  for (const mdl of models) {
+    if (KEPT.has(mdl)) continue;
+    const n = await (db as any)[mdl].count();
+    if (n > 0) leftovers.push(`${mdl} (${n})`);
+  }
+  if (leftovers.length) {
+    console.error(`\nERROR: these tables were not cleared: ${leftovers.join(", ")}`);
+    console.error("Add them to ORDER in scripts/reset.ts.");
+    process.exit(1);
+  }
 
   const users = await db.user.findMany({ select: { email: true, role: true, active: true } });
   const keptKeys = await db.setting.findMany({ where: { key: { in: PROTECTED_KEYS } } });

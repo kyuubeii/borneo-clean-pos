@@ -44,8 +44,8 @@ function OwnerDashboard() {
       } />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label={t("dash.revenueMonth")} value={<Money cents={s?.revenueCollectedCents ?? 0} />}
-          sub={`${t("dash.profit")} ${((s?.profitCents ?? 0) / 100).toLocaleString("en-MY", { maximumFractionDigits: 0 })} · ${s?.marginPct ?? 0}% ${t("dash.margin")}`}
+        <Stat label={t("dash.salesMonth")} value={<Money cents={s?.salesCents ?? 0} />}
+          sub={<>{t("dash.collected")} <Money cents={s?.revenueCollectedCents ?? 0} /> · {t("dash.profit")} <Money cents={s?.profitCents ?? 0} /> ({s?.marginPct ?? 0}%)</>}
           tone={(s?.profitCents ?? 0) >= 0 ? "good" : "bad"} />
         <Stat label={t("dash.outstanding")} value={<Money cents={o?.totalOutstandingCents ?? 0} />}
           sub={`${o?.openInvoices ?? 0} open · ${o?.overdueInvoices ?? 0} ${t("dash.overdueInvoices")}`}

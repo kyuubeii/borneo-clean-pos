@@ -1,0 +1,941 @@
+[
+ {
+  "d": "2026-07-31",
+  "k": "EXP",
+  "cat": "Cleaning Products",
+  "amt": 408.65,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-07-31",
+  "k": "EXP",
+  "cat": "Cleaning Products",
+  "amt": 65.55,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-07-31",
+  "k": "EXP",
+  "cat": "Name Card",
+  "amt": 18.0,
+  "by": "Oscar"
+ },
+ {
+  "d": "2026-08-04",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 90.0,
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Justin",
+  "match": "high"
+ },
+ {
+  "d": "2026-08-04",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 35.0,
+  "by": "Jong",
+  "cleared": true
+ },
+ {
+  "d": "2026-08-04",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 10.0,
+  "by": "Jong",
+  "cleared": true
+ },
+ {
+  "d": "2026-08-04",
+  "k": "EXP",
+  "cat": "Introducer",
+  "amt": 8.0,
+  "person": "Vero"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 160.0,
+  "to": "Jong",
+  "pay": "paid",
+  "customer": "Kristy",
+  "match": "high"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 60.0,
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Shirley",
+  "match": "high"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 35.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 35.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 17.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 10.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "EXP",
+  "cat": "Food",
+  "amt": 27.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "EXP",
+  "cat": "Introducer",
+  "amt": 16.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "EXP",
+  "cat": "Introducer",
+  "amt": 6.0,
+  "by": "Oscar"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "EXP",
+  "cat": "House",
+  "amt": 400.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-05",
+  "k": "EXP",
+  "cat": "House",
+  "amt": 400.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-06",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 80.0,
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Judith",
+  "match": "low"
+ },
+ {
+  "d": "2026-08-06",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 35.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-06",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 10.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-07",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 160.0,
+  "to": "Jong",
+  "pay": "paid",
+  "customer": "Annabelle",
+  "match": "high"
+ },
+ {
+  "d": "2026-08-07",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 70.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-07",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 10.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-07",
+  "k": "EXP",
+  "cat": "Introducer",
+  "amt": 16.0,
+  "person": "Sharon"
+ },
+ {
+  "d": "2026-08-08",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 80.0,
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Mr Bong",
+  "match": "low"
+ },
+ {
+  "d": "2026-08-08",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 35.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-08",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 10.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-09",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Joanne",
+  "match": "high"
+ },
+ {
+  "d": "2026-08-09",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 35.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-09",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 10.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-13",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 140.0,
+  "cust": "Jamelyn Urban",
+  "pay": "unpaid",
+  "customer": "Jamenlyn 505",
+  "match": "given"
+ },
+ {
+  "d": "2026-08-13",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-13",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 10.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-17",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 120.0,
+  "to": "Jong",
+  "pay": "paid",
+  "customer": "Apple Yong",
+  "match": "high"
+ },
+ {
+  "d": "2026-08-17",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 80.0,
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Edwina Song",
+  "match": "high"
+ },
+ {
+  "d": "2026-08-17",
+  "k": "EXP",
+  "cat": "Introducer",
+  "amt": 14.0,
+  "person": "Apple"
+ },
+ {
+  "d": "2026-08-17",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-17",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 60.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-19",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "cust": "Jamelyn Urban",
+  "unit": "505",
+  "pay": "unpaid",
+  "customer": "Jamenlyn 505",
+  "match": "given"
+ },
+ {
+  "d": "2026-08-19",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "cust": "Ms Sim Urban",
+  "unit": "507",
+  "pay": "unpaid",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-08-19",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-19",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-25",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "cust": "Ms Sim Urban",
+  "unit": "507",
+  "pay": "unpaid_at_time",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-08-25",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 20.0,
+  "by": "Oscar"
+ },
+ {
+  "d": "2026-08-25",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 10.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-26",
+  "k": "EXP",
+  "cat": "Trolley",
+  "amt": 99.9,
+  "by": "Oscar"
+ },
+ {
+  "d": "2026-08-27",
+  "k": "CAPITAL",
+  "from": "Oscar",
+  "to": "Aaron",
+  "amt": 1000.0
+ },
+ {
+  "d": "2026-08-27",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "cust": "Jamelyn Urban",
+  "unit": "505",
+  "pay": "unpaid",
+  "customer": "Jamenlyn 505",
+  "match": "given"
+ },
+ {
+  "d": "2026-08-27",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "cust": "Ms Sim Urban",
+  "unit": "507",
+  "pay": "unpaid_at_time",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-08-27",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 80.0,
+  "cust": "Shirley",
+  "pay": "unpaid",
+  "customer": "Shirley",
+  "match": "given"
+ },
+ {
+  "d": "2026-08-27",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 80.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-27",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-28",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 160.0,
+  "cust": "Francis Thoo",
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Francis thoo",
+  "match": "given"
+ },
+ {
+  "d": "2026-08-28",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 60.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-28",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-28",
+  "k": "EXP",
+  "cat": "Cleaning Equipment",
+  "amt": 20.8,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-29",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 180.0,
+  "cust": "Ivan Tan",
+  "to": "Oscar",
+  "pay": "collected_later",
+  "collected": "2026-09-04",
+  "customer": "Ivan tan",
+  "match": "given"
+ },
+ {
+  "d": "2026-08-29",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 80.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-08-29",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-01",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "unit": "507",
+  "pay": "unknown",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-01",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 100.0,
+  "cust": "Teko",
+  "pay": "paid",
+  "customer": "Teko",
+  "match": "given",
+  "to": "Oscar",
+  "resolved": "old app shows payment received 1 Sep"
+ },
+ {
+  "d": "2026-09-01",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 60.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-01",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-02",
+  "k": "INC",
+  "svc": "Aircon Cleaning",
+  "amt": 120.0,
+  "cust": "Liberty",
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "AD",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-02",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 50.0,
+  "by": "Oscar"
+ },
+ {
+  "d": "2026-09-03",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "unit": "505",
+  "pay": "unpaid",
+  "customer": "Jamenlyn 505",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-03",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "unit": "507",
+  "pay": "unpaid",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-03",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 180.0,
+  "cust": "Jenny",
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Jenny ting agent",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-03",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-03",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 80.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-03",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-04",
+  "k": "COLLECTION",
+  "amt": 350.0,
+  "unit": "507",
+  "to": "Oscar",
+  "covers": "13/08,18/08,20/08,25/08,27/08",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-04",
+  "k": "COLLECTION",
+  "amt": 180.0,
+  "cust": "Ivan Tan",
+  "to": "Oscar",
+  "covers": "29/08",
+  "customer": "Ivan tan",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-05",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 120.0,
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Apple Yong",
+  "match": "medium"
+ },
+ {
+  "d": "2026-09-05",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-05",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-05",
+  "k": "EXP",
+  "cat": "Cleaning Products",
+  "amt": 61.2,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-06",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 240.0,
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Angie Ng",
+  "match": "high"
+ },
+ {
+  "d": "2026-09-06",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 120.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-06",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-06",
+  "k": "CAPITAL",
+  "from": "Oscar",
+  "to": "Aaron",
+  "amt": 1000.0
+ },
+ {
+  "d": "2026-09-07",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 120.0,
+  "to": "Jong",
+  "pay": "paid",
+  "customer": "Lz",
+  "match": "high"
+ },
+ {
+  "d": "2026-09-07",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-07",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-07",
+  "k": "EXP",
+  "cat": "Introducer",
+  "amt": 12.0,
+  "person": "Apple"
+ },
+ {
+  "d": "2026-09-08",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "unit": "507",
+  "pay": "unpaid",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-08",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 90.0,
+  "cust": "Ivan Tan",
+  "pay": "unpaid",
+  "customer": "Ivan tan",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-08",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 30.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-08",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-10",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "unit": "507",
+  "pay": "unpaid",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-10",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "unit": "505",
+  "pay": "unpaid",
+  "customer": "Jamenlyn 505",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-10",
+  "k": "EXP",
+  "cat": "Extension",
+  "amt": 147.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-10",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-10",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-13",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 100.0,
+  "cust": "Charity",
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Charity",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-13",
+  "k": "INC",
+  "svc": "Aircon Cleaning",
+  "amt": 360.0,
+  "cust": "Teo",
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Grodon teo",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-13",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 100.0,
+  "cust": "Charity",
+  "to": "Oscar",
+  "pay": "paid",
+  "customer": "Charity",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-13",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 210.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-13",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-13",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-13",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-15",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "unit": "507",
+  "pay": "unpaid",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-15",
+  "k": "INC",
+  "svc": "Aircon Cleaning",
+  "amt": 360.0,
+  "cust": "Shirley",
+  "pay": "unpaid",
+  "customer": "Shirley",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-15",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-15",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 210.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-15",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-17",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "unit": "507",
+  "pay": "unpaid",
+  "customer": "Beautrix Sim 507",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-17",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 70.0,
+  "unit": "505",
+  "pay": "unpaid",
+  "customer": "Jamenlyn 505",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-17",
+  "k": "INC",
+  "svc": "House Cleaning",
+  "amt": 200.0,
+  "cust": "Vera",
+  "to": "Jong",
+  "pay": "paid",
+  "customer": "Vera",
+  "match": "given"
+ },
+ {
+  "d": "2026-09-17",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-17",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-17",
+  "k": "EXP",
+  "cat": "Worker",
+  "amt": 40.0,
+  "by": "Jong"
+ },
+ {
+  "d": "2026-09-17",
+  "k": "EXP",
+  "cat": "Driver",
+  "amt": 20.0,
+  "by": "Jong"
+ }
+]

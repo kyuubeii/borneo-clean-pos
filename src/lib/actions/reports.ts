@@ -19,7 +19,7 @@ async function revenueIn(gte: Date, lte: Date) {
 
 defineAction({
   name: "reports.summary",
-  description: "Headline business figures for a period: revenue collected, invoiced, expenses, labour cost, profit, margin, job counts and new customers. Use for 'how much did we make this month'.",
+  description: "Headline business figures for a period: sales earned, cash collected, expenses, labour cost, profit, margin, job counts and new customers. Profit is sales minus costs (accrual); revenueCollectedCents is cash actually received. Use for 'how much did we make this month'.",
   category: "Reports", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ from: z.string().optional().describe("ISO date; defaults to start of this month"), to: z.string().optional() }),
   handler: async ({ from, to }) => {
@@ -41,13 +41,19 @@ defineAction({
       }
     }
     const expenseCents = expenses._sum.amountCents ?? 0;
-    const profit = revenue - expenseCents - labour;
+    // Sales earned in the period, whether or not the money has come in yet.
+    // Profit must compare like with like: expenses are recorded on the date they are
+    // incurred, so revenue has to be sales earned, not cash collected. Mixing the two
+    // (cash in vs accrued costs) understates profit whenever customers pay late.
+    const salesCents = jobs.filter((j) => j.status !== "CANCELLED").reduce((a, j) => a + j.revenueCents, 0);
+    const profit = salesCents - expenseCents - labour;
     const newCustomers = await db.customer.count({ where: { createdAt: { gte, lte } } });
     return {
       from: gte, to: lte,
-      revenueCollectedCents: revenue, invoicedCents: invoiced,
+      salesCents, revenueCollectedCents: revenue, invoicedCents: invoiced,
+      outstandingCents: Math.max(0, salesCents - revenue),
       expenseCents, labourCents: labour, profitCents: profit,
-      marginPct: revenue > 0 ? +((profit / revenue) * 100).toFixed(1) : 0,
+      marginPct: salesCents > 0 ? +((profit / salesCents) * 100).toFixed(1) : 0,
       jobsScheduled: jobs.length, jobsCompleted: jobs.filter((j) => j.status === "COMPLETED").length,
       jobsCancelled: jobs.filter((j) => j.status === "CANCELLED").length,
       newCustomers,

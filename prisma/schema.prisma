@@ -39,6 +39,9 @@ model Staff {
   timeEntries TimeEntry[]
   payouts     Payout[]
   expenses    Expense[]
+  collected   Payment[] @relation("Collected")
+  capitalOut  CapitalEntry[] @relation("CapitalFrom")
+  capitalIn   CapitalEntry[] @relation("CapitalTo")
 }
 
 model Availability {
@@ -270,6 +273,8 @@ model Payment {
   reference  String?
   isRefund   Boolean  @default(false)
   note       String?
+  receivedById String?
+  receivedBy Staff?   @relation("Collected", fields: [receivedById], references: [id])
   createdAt  DateTime @default(now())
 }
 
@@ -353,4 +358,20 @@ model ChatMessage {
   toolCalls String?
   createdAt DateTime @default(now())
   @@index([threadId])
+}
+
+model CapitalEntry {
+  id        String   @id @default(cuid())
+  ref       String   @unique
+  kind      String   @default("TRANSFER") // TRANSFER | CONTRIBUTION | DRAWING
+  fromId    String?
+  from      Staff?   @relation("CapitalFrom", fields: [fromId], references: [id])
+  toId      String?
+  to        Staff?   @relation("CapitalTo", fields: [toId], references: [id])
+  fromName  String?
+  toName    String?
+  amountCents Int
+  occurredAt DateTime @default(now())
+  note      String?
+  createdAt DateTime @default(now())
 }
