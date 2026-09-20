@@ -1,3 +1,4 @@
+import { scheduleWrite, validSlot } from "../scheduling";
 import { z } from "zod";
 import { db } from "../db";
 import { optionalId } from "../schema";
@@ -34,7 +35,7 @@ defineAction({
     const rows = await db.quote.findMany({ where: { ...(status ? { status } : {}), ...(customerId ? { customerId } : {}) },
       orderBy: { issuedAt: "desc" }, take: limit, include: { customer: true, items: true } });
     return rows.map((q) => ({ id: q.id, ref: q.ref, customer: q.customer.name, status: q.status,
-      issuedAt: q.issuedAt, validUntil: q.validUntil, ...totals(q.items, q.discountCents, q.taxRateBp) }));
+      convertedBookingId: q.convertedBookingId, issuedAt: q.issuedAt, validUntil: q.validUntil, ...totals(q.items, q.discountCents, q.taxRateBp) }));
   },
 });
 
@@ -62,7 +63,12 @@ defineAction({
   description: "Change a quote's status, e.g. mark it SENT, ACCEPTED or DECLINED.",
   category: "Quotes", roles: ["OWNER", "ADMIN"],
   input: z.object({ quoteId: z.string(), status: z.enum(["DRAFT","SENT","ACCEPTED","DECLINED","EXPIRED"]) }),
-  handler: async ({ quoteId, status }) => db.quote.update({ where: { id: quoteId }, data: { status } }),
+  handler: async ({ quoteId, status }) => {
+    const q = await db.quote.findUnique({ where: { id: quoteId } });
+    if (!q) throw new ActionError("Quote not found");
+    if (q.convertedBookingId) throw new ActionError("This quote is already booked. Open the linked booking.");
+    return db.quote.update({ where: { id: quoteId }, data: { status } });
+  },
 });
 
 defineAction({
@@ -70,7 +76,7 @@ defineAction({
   description: "Turn an accepted quote into a booking and job at a given date/time.",
   category: "Quotes", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
   input: z.object({ quoteId: z.string(), startAt: z.string().describe("ISO datetime for the visit") }),
-  handler: async ({ quoteId, startAt }) => {
+  handler: async ({ quoteId, startAt }) => scheduleWrite(async (db) => {
     const q = await db.quote.findUnique({ where: { id: quoteId }, include: { items: { include: { service: true } }, customer: { include: { addresses: true } } } });
     if (!q) throw new ActionError("Quote not found");
     // A deleted booking leaves this column pointing at nothing, since it is not
@@ -79,24 +85,26 @@ defineAction({
       const prior = await db.booking.findUnique({ where: { id: q.convertedBookingId }, select: { ref: true } });
       if (prior) throw new ActionError(`This quote has already been converted into booking ${prior.ref}.`);
     }
+    if (q.status !== "ACCEPTED") throw new ActionError("Accept the quote before creating a booking.");
     const t = totals(q.items, q.discountCents, q.taxRateBp);
     const when = new Date(startAt);
-    const duration = q.items.reduce((a, i) => a + (i.service?.durationMin ?? 120) * i.qty, 0) || 120;
+    validSlot(when, 120);
+    const duration = q.items.reduce((a: number, i: any) => a + (i.service?.durationMin ?? 120) * i.qty, 0) || 120;
     const booking = await db.booking.create({ data: {
-      ref: await nextRef("BKG", "booking"), customerId: q.customerId,
-      addressId: q.customer.addresses.find((a) => a.isPrimary)?.id ?? q.customer.addresses[0]?.id,
+      ref: await nextRef("BKG", "booking", db), customerId: q.customerId,
+      addressId: q.customer.addresses.find((a: any) => a.isPrimary)?.id ?? q.customer.addresses[0]?.id,
       startAt: when, durationMin: duration, notes: q.notes, quoteId: q.id,
-      items: { create: q.items.filter((i) => i.serviceId).map((i) => ({ serviceId: i.serviceId!, qty: i.qty, priceCents: i.priceCents, name: i.name })) },
+      items: { create: q.items.filter((i: any) => i.serviceId).map((i: any) => ({ serviceId: i.serviceId!, qty: i.qty, priceCents: i.priceCents, name: i.name })) },
     } });
     const job = await db.job.create({ data: {
-      ref: await nextRef("JOB", "job"), bookingId: booking.id, customerId: q.customerId,
+      ref: await nextRef("JOB", "job", db), bookingId: booking.id, customerId: q.customerId,
       addressId: booking.addressId, scheduledAt: when, durationMin: duration,
       revenueCents: t.total, customerInstructions: q.notes,
-      checklist: { create: q.items.map((i, n) => ({ label: i.name, sort: n })) },
+      checklist: { create: q.items.map((i: any, n: number) => ({ label: i.name, sort: n })) },
     } });
     await db.quote.update({ where: { id: quoteId }, data: { status: "ACCEPTED", convertedBookingId: booking.id } });
     return { quoteRef: q.ref, bookingRef: booking.ref, jobRef: job.ref, totalCents: t.total };
-  },
+  }),
 });
 
 /* --------------------------------- Invoices -------------------------------- */
@@ -166,22 +174,25 @@ defineAction({
   name: "invoices.createFromJob",
   description: "Create an invoice for a completed job, using the job's services as line items and linking the job to it. Use for 'create an invoice for this completed job'.",
   category: "Invoices", roles: ["OWNER", "ADMIN"],
-  input: z.object({ jobId: z.string(), dueDays: z.number().int().default(14), taxRateBp: z.number().int().min(0).default(0) }),
-  handler: async ({ jobId, dueDays, taxRateBp }) => {
+  input: z.object({ jobId: z.string(), dueDays: z.number().int().default(14), taxRateBp: z.number().int().min(0).optional() }),
+  handler: async ({ jobId, dueDays, taxRateBp }) => scheduleWrite(async (db) => {
     const j = await db.job.findUnique({ where: { id: jobId }, include: { customer: true, booking: { include: { items: true } } } });
     if (!j) throw new ActionError("Job not found");
     if (j.invoiceId) throw new ActionError(`Job ${j.ref} is already on an invoice`);
-    const items = j.booking?.items.length
-      ? j.booking.items.map((i) => ({ name: i.name, qty: i.qty, priceCents: i.priceCents }))
+    const quote = j.booking?.quoteId ? await db.quote.findUnique({ where: { id: j.booking.quoteId }, include: { items: true } }) : null;
+    const discountCents = quote?.discountCents ?? 0;
+    const rate = taxRateBp ?? quote?.taxRateBp ?? 0;
+    const items = quote ? quote.items.map((i: any) => ({ name: i.name, qty: i.qty, priceCents: i.priceCents })) : j.booking?.items.length
+      ? j.booking.items.map((i: any) => ({ name: i.name, qty: i.qty, priceCents: i.priceCents }))
       : [{ name: `Cleaning service — job ${j.ref}`, qty: 1, priceCents: j.revenueCents }];
     const inv = await db.invoice.create({ data: {
-      ref: await nextRef("INV", "invoice"), customerId: j.customerId, status: "SENT",
-      taxRateBp, dueAt: addDays(new Date(), dueDays), items: { create: items },
+      ref: await nextRef("INV", "invoice", db), customerId: j.customerId, status: "SENT",
+      taxRateBp: rate, discountCents, dueAt: addDays(new Date(), dueDays), items: { create: items },
     }, include: { items: true } });
     await db.job.update({ where: { id: jobId }, data: { invoiceId: inv.id } });
-    await notify({ type: "INVOICE", title: `Invoice ${inv.ref} raised`, body: `${j.customer.name} · job ${j.ref}`, link: `/invoices/${inv.id}` });
-    return { invoiceId: inv.id, ref: inv.ref, jobRef: j.ref, ...totals(inv.items, 0, taxRateBp) };
-  },
+    await notify({ type: "INVOICE", title: `Invoice ${inv.ref} raised`, body: `${j.customer.name} · job ${j.ref}`, link: `/invoices/${inv.id}` }, db);
+    return { invoiceId: inv.id, ref: inv.ref, jobRef: j.ref, ...totals(inv.items, discountCents, rate) };
+  }),
 });
 
 defineAction({

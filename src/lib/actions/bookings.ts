@@ -1,10 +1,24 @@
 import { z } from "zod";
 import { db } from "../db";
+import { totals } from "../money";
 import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { nextRef } from "../ref";
 import { startOfDay, endOfDay, addDays, addMonths } from "../dates";
+import { assertAvailable, scheduleWrite, setJobStatus } from "../scheduling";
 import { notify } from "../notify";
+
+
+async function withQuotedAmounts(rows: any[]) {
+  const ids = rows.map(b => b.quoteId).filter(Boolean);
+  if (!ids.length) return rows;
+  const quotes = await db.quote.findMany({ where: { id: { in: ids } }, include: { items: true } });
+  return rows.map(b => {
+    const q = quotes.find(q => q.id === b.quoteId);
+    return q ? { ...b, items: q.items, totalCents: totals(q.items, q.discountCents, q.taxRateBp).total,
+      discountCents: q.discountCents, taxRateBp: q.taxRateBp } : b;
+  });
+}
 
 /** Expand a recurrence rule into concrete dates, capped so we never generate forever. */
 function occurrences(start: Date, rule: string, until: Date | null): Date[] {
@@ -19,17 +33,17 @@ function occurrences(start: Date, rule: string, until: Date | null): Date[] {
   return out;
 }
 
-async function createJobForBooking(bookingId: string) {
+async function createJobForBooking(bookingId: string, db: any) {
   const b = await db.booking.findUnique({ where: { id: bookingId }, include: { items: { include: { service: true } } } });
   if (!b) return null;
-  const revenue = b.items.reduce((a, i) => a + i.qty * i.priceCents, 0);
-  const material = b.items.reduce((a, i) => a + i.qty * i.service.materialCostCents, 0);
+  const revenue = b.items.reduce((a: number, i: any) => a + i.qty * i.priceCents, 0);
+  const material = b.items.reduce((a: number, i: any) => a + i.qty * i.service.materialCostCents, 0);
   return db.job.create({
     data: {
-      ref: await nextRef("JOB", "job"), bookingId: b.id, customerId: b.customerId, addressId: b.addressId,
+      ref: await nextRef("JOB", "job", db), bookingId: b.id, customerId: b.customerId, addressId: b.addressId,
       scheduledAt: b.startAt, durationMin: b.durationMin, customerInstructions: b.notes,
       internalNotes: b.internalNotes, revenueCents: revenue, materialCostCents: material,
-      checklist: { create: b.items.map((i, n) => ({ label: i.name, sort: n })) },
+      checklist: { create: b.items.map((i: any, n: number) => ({ label: i.name, sort: n })) },
     },
   });
 }
@@ -41,16 +55,19 @@ defineAction({
   input: z.object({
     from: z.string().optional().describe("ISO date, inclusive"), to: z.string().optional(),
     status: z.enum(["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"]).optional(),
+    query: z.string().optional(), offset: z.number().int().min(0).default(0),
+    direction: z.enum(["asc", "desc"]).default("asc"),
     customerId: optionalId(), limit: z.number().int().max(100).default(50),
   }),
-  handler: async ({ from, to, status, customerId, limit }) => db.booking.findMany({
+  handler: async ({ from, to, status, customerId, limit, query, offset, direction }) => withQuotedAmounts(await db.booking.findMany({
     where: {
+      ...(query ? { OR: [{ ref: { contains: query, mode: "insensitive" as const } }, { customer: { name: { contains: query, mode: "insensitive" as const } } }] } : {}),
       ...(status ? { status } : {}), ...(customerId ? { customerId } : {}),
       ...(from || to ? { startAt: { ...(from ? { gte: startOfDay(new Date(from)) } : {}), ...(to ? { lte: endOfDay(new Date(to)) } : {}) } } : {}),
     },
-    orderBy: { startAt: "asc" }, take: limit,
+    orderBy: [{ startAt: direction }, { id: direction }], skip: offset, take: limit,
     include: { customer: true, address: true, items: true, job: true },
-  }),
+  })),
 });
 
 defineAction({
@@ -62,7 +79,7 @@ defineAction({
     const b = await db.booking.findUnique({ where: { id: bookingId },
       include: { customer: true, address: true, items: true, job: true, children: true, parent: true } });
     if (!b) throw new ActionError("Booking not found");
-    return b;
+    return (await withQuotedAmounts([b]))[0];
   },
 });
 
@@ -82,27 +99,30 @@ defineAction({
     staffIds: z.array(z.string()).optional().describe("Cleaners to assign immediately"),
   }),
   handler: async (i, ctx) => {
+    return scheduleWrite(async (db) => {
     const customer = await db.customer.findUnique({ where: { id: i.customerId }, include: { addresses: true } });
     if (!customer) throw new ActionError("Customer not found");
     const services = await db.service.findMany({ where: { id: { in: i.serviceIds } } });
     if (services.length !== i.serviceIds.length) throw new ActionError("One or more services not found");
-    const addressId = i.addressId ?? customer.addresses.find((a) => a.isPrimary)?.id ?? customer.addresses[0]?.id;
-    const duration = services.reduce((a, s) => a + s.durationMin, 0) || 120;
+    const addressId = i.addressId ?? customer.addresses.find((a: any) => a.isPrimary)?.id ?? customer.addresses[0]?.id;
+    const duration = services.reduce((a: number, s: any) => a + s.durationMin, 0) || 120;
     const start = new Date(i.startAt);
+    if (i.recurUntil && (!Number.isFinite(new Date(i.recurUntil).getTime()) || new Date(i.recurUntil) < start)) throw new ActionError("Repeat until must be on or after the first visit.");
 
     const make = async (when: Date, parentId?: string) => {
+      await assertAvailable(db, i.staffIds ?? [], when, duration);
       const b = await db.booking.create({
         data: {
-          ref: await nextRef("BKG", "booking"), customerId: i.customerId, addressId,
+          ref: await nextRef("BKG", "booking", db), customerId: i.customerId, addressId,
           startAt: when, durationMin: duration, notes: i.notes, internalNotes: i.internalNotes,
           source: ctx.source === "assistant" ? "ASSISTANT" : "ADMIN",
           recurrence: parentId ? "NONE" : i.recurrence,
           recurUntil: i.recurUntil && !parentId ? new Date(i.recurUntil) : null,
           parentId,
-          items: { create: services.map((s) => ({ serviceId: s.id, qty: 1, priceCents: s.priceCents, name: s.name })) },
+          items: { create: services.map((s: any) => ({ serviceId: s.id, qty: 1, priceCents: s.priceCents, name: s.name })) },
         },
       });
-      const job = await createJobForBooking(b.id);
+      const job = await createJobForBooking(b.id, db);
       if (job && i.staffIds?.length) {
         await db.jobAssignment.createMany({ data: i.staffIds.map((sid, n) => ({ jobId: job.id, staffId: sid, isLead: n === 0 })) });
       }
@@ -118,9 +138,10 @@ defineAction({
       }
     }
     await notify({ type: "BOOKING_CONFIRMED", title: `Booking ${first.booking.ref} confirmed`,
-      body: `${customer.name} · ${start.toLocaleString("en-MY")}`, link: `/bookings/${first.booking.id}` });
+      body: `${customer.name} · ${start.toLocaleString("en-MY")}`, link: `/bookings/${first.booking.id}` }, db);
     return { booking: first.booking, jobRef: first.job?.ref, recurringCreated: extra.length, recurringRefs: extra,
-      total: services.reduce((a, s) => a + s.priceCents, 0) };
+      total: services.reduce((a: number, s: any) => a + s.priceCents, 0) };
+    });
   },
 });
 
@@ -129,16 +150,17 @@ defineAction({
   description: "Move a single booking (and its job) to a new date/time. Only affects that one occurrence, never the whole recurring series.",
   category: "Bookings", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
   input: z.object({ bookingId: z.string(), startAt: z.string().describe("New ISO datetime"), reason: z.string().optional() }),
-  handler: async ({ bookingId, startAt, reason }) => {
-    const b = await db.booking.findUnique({ where: { id: bookingId }, include: { job: true, customer: true } });
+  handler: async ({ bookingId, startAt, reason }) => scheduleWrite(async (db) => {
+    const b = await db.booking.findUnique({ where: { id: bookingId }, include: { job: { include: { assignments: true } }, customer: true } });
     if (!b) throw new ActionError("Booking not found");
     const when = new Date(startAt);
+    await assertAvailable(db, b.job?.assignments.map((a: any) => a.staffId) ?? [], when, b.durationMin, b.job?.id);
     const updated = await db.booking.update({ where: { id: bookingId }, data: { startAt: when } });
     if (b.job) await db.job.update({ where: { id: b.job.id }, data: { scheduledAt: when } });
     await notify({ type: "SCHEDULE_CHANGE", title: `Booking ${b.ref} moved`,
-      body: `${b.customer.name} → ${when.toLocaleString("en-MY")}${reason ? ` (${reason})` : ""}`, link: `/bookings/${bookingId}` });
+      body: `${b.customer.name} → ${when.toLocaleString("en-MY")}${reason ? ` (${reason})` : ""}`, link: `/bookings/${bookingId}` }, db);
     return { ref: b.ref, from: b.startAt, to: updated.startAt };
-  },
+  }),
 });
 
 defineAction({
@@ -146,21 +168,22 @@ defineAction({
   description: "Cancel a booking and its job. Optionally cancel the remaining future occurrences of a recurring series too.",
   category: "Bookings", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
   input: z.object({ bookingId: z.string(), reason: z.string().optional(), wholeSeries: z.boolean().default(false) }),
-  handler: async ({ bookingId, reason, wholeSeries }) => {
+  handler: async ({ bookingId, reason, wholeSeries }) => scheduleWrite(async (db) => {
     const b = await db.booking.findUnique({ where: { id: bookingId }, include: { customer: true } });
     if (!b) throw new ActionError("Booking not found");
     const ids = [bookingId];
     if (wholeSeries) {
       const rootId = b.parentId ?? b.id;
       const kin = await db.booking.findMany({ where: { OR: [{ id: rootId }, { parentId: rootId }], startAt: { gte: new Date() }, status: { not: "CANCELLED" } } });
-      ids.push(...kin.map((k) => k.id));
+      ids.push(...kin.map((k: any) => k.id));
     }
     const unique = [...new Set(ids)];
     await db.booking.updateMany({ where: { id: { in: unique } }, data: { status: "CANCELLED", cancelReason: reason } });
-    await db.job.updateMany({ where: { bookingId: { in: unique } }, data: { status: "CANCELLED" } });
-    await notify({ type: "SCHEDULE_CHANGE", title: `Booking ${b.ref} cancelled`, body: `${b.customer.name}${reason ? ` · ${reason}` : ""}` });
+    const jobs = await db.job.findMany({ where: { bookingId: { in: unique } } });
+    for (const job of jobs) await setJobStatus(db, job.id, "CANCELLED");
+    await notify({ type: "SCHEDULE_CHANGE", title: `Booking ${b.ref} cancelled`, body: `${b.customer.name}${reason ? ` · ${reason}` : ""}` }, db);
     return { cancelled: unique.length, refs: b.ref };
-  },
+  }),
 });
 
 defineAction({
@@ -168,5 +191,10 @@ defineAction({
   description: "Change a booking's status (PENDING, CONFIRMED, COMPLETED).",
   category: "Bookings", roles: ["OWNER", "ADMIN"],
   input: z.object({ bookingId: z.string(), status: z.enum(["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"]) }),
-  handler: async ({ bookingId, status }) => db.booking.update({ where: { id: bookingId }, data: { status } }),
+  handler: async ({ bookingId, status }) => scheduleWrite(async (db) => {
+    const booking = await db.booking.findUnique({ where: { id: bookingId }, include: { job: true } });
+    if (!booking) throw new ActionError("Booking not found");
+    if (booking.job) await setJobStatus(db, booking.job.id, status === "CANCELLED" || status === "COMPLETED" ? status : (["EN_ROUTE", "IN_PROGRESS"].includes(booking.job.status) ? booking.job.status : "SCHEDULED"), status);
+    return db.booking.update({ where: { id: bookingId }, data: { status } });
+  }),
 });

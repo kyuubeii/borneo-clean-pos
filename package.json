@@ -15,7 +15,8 @@
     "import:customers": "tsx scripts/customer-profiles.ts",
     "audit": "tsx scripts/audit.ts",
     "catalogue": "tsx scripts/restore-catalogue.ts",
-    "verify": "tsx scripts/verify-fixes.ts"
+    "verify": "tsx scripts/verify-fixes.ts",
+    "test:polish": "node scripts/test-polish.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

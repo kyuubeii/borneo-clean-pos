@@ -1,3 +1,4 @@
+import { assertAvailable, scheduleWrite, setJobStatus } from "../scheduling";
 import { z } from "zod";
 import { db } from "../db";
 import { optionalId } from "../schema";
@@ -39,7 +40,7 @@ defineAction({
       position: n + 1, id: j.id, ref: j.ref, status: j.status, scheduledAt: j.scheduledAt,
       durationMin: j.durationMin, customer: j.customer.name, customerId: j.customerId,
       address: j.address ? `${j.address.line1}${j.address.city ? ", " + j.address.city : ""}` : null,
-      cleaners: j.assignments.map((a) => a.staff.name), revenueCents: j.revenueCents,
+      staffIds: j.assignments.map((a) => a.staffId), cleaners: j.assignments.map((a) => a.staff.name), revenueCents: j.revenueCents,
     }));
   },
 });
@@ -64,17 +65,7 @@ defineAction({
   description: "Change a job's status. Setting COMPLETED stamps the completion time and closes any open check-ins.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), status: z.enum(["SCHEDULED", "EN_ROUTE", "IN_PROGRESS", "COMPLETED", "CANCELLED"]) }),
-  handler: async ({ jobId, status }) => {
-    const j = await db.job.findUnique({ where: { id: jobId }, include: { customer: true } });
-    if (!j) throw new ActionError("Job not found");
-    if (status === "COMPLETED") {
-      const open = await db.timeEntry.findMany({ where: { jobId, endAt: null } });
-      for (const e of open) await db.timeEntry.update({ where: { id: e.id }, data: { endAt: new Date() } });
-      if (j.bookingId) await db.booking.update({ where: { id: j.bookingId }, data: { status: "COMPLETED" } });
-      await notify({ type: "JOB_COMPLETED", title: `Job ${j.ref} completed`, body: j.customer.name, link: `/jobs/${jobId}` });
-    }
-    return db.job.update({ where: { id: jobId }, data: { status, completedAt: status === "COMPLETED" ? new Date() : null } });
-  },
+  handler: async ({ jobId, status }) => scheduleWrite(async (db) => setJobStatus(db, jobId, status)),
 });
 
 defineAction({
@@ -82,14 +73,15 @@ defineAction({
   description: "Move a job to a new date/time, keeping its booking in step.",
   category: "Jobs", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
   input: z.object({ jobId: z.string(), scheduledAt: z.string().describe("New ISO datetime") }),
-  handler: async ({ jobId, scheduledAt }) => {
-    const j = await db.job.findUnique({ where: { id: jobId }, include: { customer: true } });
+  handler: async ({ jobId, scheduledAt }) => scheduleWrite(async (db) => {
+    const j = await db.job.findUnique({ where: { id: jobId }, include: { customer: true, assignments: true } });
     if (!j) throw new ActionError("Job not found");
     const when = new Date(scheduledAt);
+    await assertAvailable(db, j.assignments.map((a: any) => a.staffId), when, j.durationMin, jobId);
     if (j.bookingId) await db.booking.update({ where: { id: j.bookingId }, data: { startAt: when } });
-    await notify({ type: "SCHEDULE_CHANGE", title: `Job ${j.ref} moved`, body: `${j.customer.name} → ${when.toLocaleString("en-MY")}`, link: `/jobs/${jobId}` });
+    await notify({ type: "SCHEDULE_CHANGE", title: `Job ${j.ref} moved`, body: `${j.customer.name} → ${when.toLocaleString("en-MY")}`, link: `/jobs/${jobId}` }, db);
     return db.job.update({ where: { id: jobId }, data: { scheduledAt: when } });
-  },
+  }),
 });
 
 defineAction({
@@ -97,15 +89,16 @@ defineAction({
   description: "Assign or reassign cleaners to a job. Replaces the current assignment list. The first cleaner becomes the lead.",
   category: "Jobs", roles: ["OWNER", "ADMIN"],
   input: z.object({ jobId: z.string(), staffIds: z.array(z.string()).describe("Full replacement list of staff IDs") }),
-  handler: async ({ jobId, staffIds }) => {
+  handler: async ({ jobId, staffIds }) => scheduleWrite(async (db) => {
     const j = await db.job.findUnique({ where: { id: jobId } });
     if (!j) throw new ActionError("Job not found");
+    await assertAvailable(db, staffIds, j.scheduledAt, j.durationMin, jobId);
     await db.jobAssignment.deleteMany({ where: { jobId } });
     if (staffIds.length) await db.jobAssignment.createMany({ data: staffIds.map((s, n) => ({ jobId, staffId: s, isLead: n === 0 })) });
     const staff = await db.staff.findMany({ where: { id: { in: staffIds } } });
-    for (const s of staff) await notify({ type: "STAFF", title: `Assigned to job ${j.ref}`, body: s.name, link: `/jobs/${jobId}` });
-    return { jobRef: j.ref, assigned: staff.map((s) => s.name) };
-  },
+    for (const s of staff) await notify({ type: "STAFF", title: `Assigned to job ${j.ref}`, body: s.name, link: `/jobs/${jobId}` }, db);
+    return { jobRef: j.ref, assigned: staff.map((s: any) => s.name) };
+  }),
 });
 
 defineAction({
@@ -115,7 +108,15 @@ defineAction({
   input: z.object({ jobId: z.string(), customerInstructions: z.string().optional(),
     internalNotes: z.string().optional(), staffNotes: z.string().optional(),
     materialCostCents: z.number().int().min(0).optional(), durationMin: z.number().int().min(15).optional() }),
-  handler: async ({ jobId, ...data }) => db.job.update({ where: { id: jobId }, data }),
+  handler: async ({ jobId, ...data }) => scheduleWrite(async (db) => {
+    const job = await db.job.findUnique({ where: { id: jobId }, include: { assignments: true } });
+    if (!job) throw new ActionError("Job not found");
+    if (data.durationMin !== undefined && data.durationMin !== job.durationMin) {
+      if (!["COMPLETED", "CANCELLED"].includes(job.status)) await assertAvailable(db, job.assignments.map((a: any) => a.staffId), job.scheduledAt, data.durationMin, jobId);
+      if (job.bookingId) await db.booking.update({ where: { id: job.bookingId }, data: { durationMin: data.durationMin } });
+    }
+    return db.job.update({ where: { id: jobId }, data });
+  }),
 });
 
 defineAction({
@@ -210,4 +211,23 @@ defineAction({
       staffWithoutRate: breakdown.filter((b) => b.noRate).map((b) => b.staff),
     };
   },
+});
+
+// Calendar move updates the date and full team as one operation.
+defineAction({
+  name: "jobs.move", description: "Move a job and assign its complete cleaner team together.",
+  category: "Jobs", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
+  input: z.object({ jobId: z.string(), scheduledAt: z.string(), staffIds: z.array(z.string()) }),
+  handler: async ({ jobId, scheduledAt, staffIds }) => scheduleWrite(async (db) => {
+    const j = await db.job.findUnique({ where: { id: jobId } });
+    if (!j) throw new ActionError("Job not found");
+    if (["COMPLETED", "CANCELLED"].includes(j.status)) throw new ActionError("Reopen this job before moving it.");
+    const when = new Date(scheduledAt);
+    await assertAvailable(db, staffIds, when, j.durationMin, jobId);
+    await db.jobAssignment.deleteMany({ where: { jobId } });
+    if (staffIds.length) await db.jobAssignment.createMany({ data: staffIds.map((staffId, n) => ({ jobId, staffId, isLead: n === 0 })) });
+    if (j.bookingId) await db.booking.update({ where: { id: j.bookingId }, data: { startAt: when } });
+    await notify({ type: "SCHEDULE_CHANGE", title: `Job ${j.ref} moved`, link: `/jobs/${jobId}` }, db);
+    return db.job.update({ where: { id: jobId }, data: { scheduledAt: when } });
+  }),
 });

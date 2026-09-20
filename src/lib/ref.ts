@@ -10,8 +10,8 @@ import { db } from "./db";
  * the counter again. Every model uses one prefix and a zero-padded 4-digit
  * number, so ordering by `ref` descending gives the highest in use.
  */
-export async function nextRef(prefix: string, model: "booking"|"job"|"invoice"|"quote"|"payment"|"expense"|"payout") {
-  const last = await (db as any)[model].findFirst({ orderBy: { ref: "desc" }, select: { ref: true } });
+export async function nextRef(prefix: string, model: "booking"|"job"|"invoice"|"quote"|"payment"|"expense"|"payout", client: any = db) {
+  const last = await client[model].findFirst({ orderBy: { ref: "desc" }, select: { ref: true } });
   const highest = last ? parseInt(String(last.ref).split("-")[1] ?? "0", 10) : 0;
   return `${prefix}-${String((Number.isFinite(highest) ? highest : 0) + 1).padStart(4, "0")}`;
 }

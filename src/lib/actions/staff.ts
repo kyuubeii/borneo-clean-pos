@@ -1,3 +1,4 @@
+import { availability } from "../scheduling";
 import { z } from "zod";
 import { db } from "../db";
 import { defineAction, ActionError } from "../registry";
@@ -56,29 +57,8 @@ defineAction({
   name: "staff.findAvailable",
   description: "Find which cleaners are free for a given date/time and duration, checking both their weekly availability and existing job assignments. Use before assigning a cleaner.",
   category: "Staff", roles: ["OWNER", "ADMIN"], readOnly: true,
-  input: z.object({ startAt: z.string().describe("ISO datetime"), durationMin: z.number().int().default(120) }),
-  handler: async ({ startAt, durationMin }) => {
-    const start = new Date(startAt);
-    const end = new Date(start.getTime() + durationMin * 60000);
-    const mins = start.getHours() * 60 + start.getMinutes();
-    const endMins = mins + durationMin;
-    const staff = await db.staff.findMany({ where: { active: true }, include: { availability: true } });
-    const jobs = await db.job.findMany({
-      where: { status: { notIn: ["CANCELLED"] }, scheduledAt: { gte: startOfDay(start), lte: endOfDay(start) } },
-      include: { assignments: true },
-    });
-    return staff.map((s) => {
-      const avail = s.availability.filter((a) => a.weekday === start.getDay());
-      const worksThen = avail.length === 0 ? true : avail.some((a) => mins >= a.startMin && endMins <= a.endMin);
-      const clash = jobs.find((j) => {
-        if (!j.assignments.some((a) => a.staffId === s.id)) return false;
-        const js = j.scheduledAt.getTime(), je = js + j.durationMin * 60000;
-        return js < end.getTime() && je > start.getTime();
-      });
-      return { staffId: s.id, name: s.name, available: worksThen && !clash,
-        reason: clash ? `Already on job ${clash.ref}` : !worksThen ? "Outside working hours" : "Free" };
-    });
-  },
+  input: z.object({ startAt: z.string().describe("ISO datetime"), durationMin: z.number().int().default(120), excludeJobId: z.string().optional() }),
+  handler: async ({ startAt, durationMin, excludeJobId }) => availability(db, new Date(startAt), durationMin, excludeJobId),
 });
 
 defineAction({

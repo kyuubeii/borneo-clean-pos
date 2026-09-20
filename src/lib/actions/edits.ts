@@ -1,3 +1,4 @@
+import { assertAvailable, scheduleWrite, setJobStatus } from "../scheduling";
 import { z } from "zod";
 import { db } from "../db";
 import { optionalId, nullableId, optionalText, clearableText } from "../schema";
@@ -14,26 +15,37 @@ defineAction({
   category: "Bookings", roles: [...ADMIN],
   input: z.object({
     bookingId: z.string(),
+    status: z.enum(["PENDING", "CONFIRMED", "COMPLETED", "CANCELLED"]).optional(),
     serviceIds: z.array(z.string()).optional().describe("Replaces the whole service list; also updates the job's revenue"),
     addressId: optionalId(), notes: z.string().optional(),
     internalNotes: z.string().optional(), durationMin: z.number().int().min(15).optional(),
   }),
-  handler: async ({ bookingId, serviceIds, ...rest }) => {
-    const b = await db.booking.findUnique({ where: { id: bookingId }, include: { job: true } });
+  handler: async ({ bookingId, serviceIds, status, ...rest }) => scheduleWrite(async (db) => {
+    const b = await db.booking.findUnique({ where: { id: bookingId }, include: { job: { include: { assignments: true } } } });
     if (!b) throw new ActionError("Booking not found");
+    if (serviceIds && (b.quoteId || b.job?.invoiceId)) throw new ActionError("This booking has a quote or invoice. Keep its agreed service lines and create a revised quote for a price change.");
     if (serviceIds) {
       const services = await db.service.findMany({ where: { id: { in: serviceIds } } });
       if (services.length !== serviceIds.length) throw new ActionError("One or more services not found");
       await db.bookingItem.deleteMany({ where: { bookingId } });
-      await db.bookingItem.createMany({ data: services.map((s) => ({ bookingId, serviceId: s.id, qty: 1, priceCents: s.priceCents, name: s.name })) });
-      const revenue = services.reduce((a, s) => a + s.priceCents, 0);
-      const material = services.reduce((a, s) => a + s.materialCostCents, 0);
-      const duration = rest.durationMin ?? services.reduce((a, s) => a + s.durationMin, 0);
+      await db.bookingItem.createMany({ data: services.map((s: any) => ({ bookingId, serviceId: s.id, qty: 1, priceCents: s.priceCents, name: s.name })) });
+      const revenue = services.reduce((a: number, s: any) => a + s.priceCents, 0);
+      const material = services.reduce((a: number, s: any) => a + s.materialCostCents, 0);
+      const duration = rest.durationMin ?? services.reduce((a: number, s: any) => a + s.durationMin, 0);
       if (b.job) await db.job.update({ where: { id: b.job.id }, data: { revenueCents: revenue, materialCostCents: material, durationMin: duration } });
       rest.durationMin = duration;
     }
-    return db.booking.update({ where: { id: bookingId }, data: rest, include: { items: true, customer: true } });
-  },
+    if (b.job) {
+      const duration = rest.durationMin ?? b.durationMin;
+      if ((serviceIds || duration !== b.durationMin) && !["COMPLETED", "CANCELLED"].includes(b.job.status))
+        await assertAvailable(db, b.job.assignments.map((a: any) => a.staffId), b.startAt, duration, b.job.id);
+      await db.job.update({ where: { id: b.job.id }, data: {
+        durationMin: duration, addressId: rest.addressId, customerInstructions: rest.notes, internalNotes: rest.internalNotes,
+      } });
+    }
+    if (status && status !== b.status && b.job) await setJobStatus(db, b.job.id, ["CANCELLED", "COMPLETED"].includes(status) ? status : (["EN_ROUTE", "IN_PROGRESS"].includes(b.job.status) ? b.job.status : "SCHEDULED"), status);
+    return db.booking.update({ where: { id: bookingId }, data: { ...rest, ...(status ? { status } : {}) }, include: { items: true, customer: true } });
+  }),
 });
 
 /* --------------------------------- Jobs ----------------------------------- */
@@ -151,6 +163,7 @@ defineAction({
     if (job.invoice && job.invoice.items.length > 1)
       throw new ActionError(`Invoice ${job.invoice.ref} has ${job.invoice.items.length} lines. Edit it directly so each line keeps its own amount.`);
 
+    if (job.booking?.quoteId) throw new ActionError("This job uses an agreed quote. Create a revised quote instead of replacing its total.");
     const was = job.revenueCents;
     await db.job.update({ where: { id: jobId }, data: { revenueCents: amountCents } });
     if (job.booking?.items[0]) await db.bookingItem.update({ where: { id: job.booking.items[0].id }, data: { priceCents: amountCents, qty: 1 } });
