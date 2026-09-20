@@ -11,7 +11,7 @@ defineAction({
     where: {
       ...(includeInactive ? {} : { active: true }),
       ...(addonsOnly === undefined ? {} : { isAddon: addonsOnly }),
-      ...(query ? { OR: [{ name: { contains: query } }, { category: { contains: query } }] } : {}),
+      ...(query ? { OR: [{ name: { contains: query, mode: "insensitive" as const } }, { category: { contains: query, mode: "insensitive" as const } }] } : {}),
     },
     orderBy: [{ isAddon: "asc" }, { category: "asc" }, { name: "asc" }],
   }),

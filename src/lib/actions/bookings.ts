@@ -168,5 +168,30 @@ defineAction({
   description: "Change a booking's status (PENDING, CONFIRMED, COMPLETED).",
   category: "Bookings", roles: ["OWNER", "ADMIN"],
   input: z.object({ bookingId: z.string(), status: z.enum(["PENDING", "CONFIRMED", "CANCELLED", "COMPLETED"]) }),
-  handler: async ({ bookingId, status }) => db.booking.update({ where: { id: bookingId }, data: { status } }),
+  handler: async ({ bookingId, status }) => {
+    const b = await db.booking.findUnique({ where: { id: bookingId }, include: { job: true } });
+    if (!b) throw new ActionError("That booking no longer exists.");
+    const updated = await db.booking.update({ where: { id: bookingId }, data: { status } });
+
+    // The booking and its job have to move together. This used to change only the
+    // booking, so cancelling one here left its job SCHEDULED -- still on the
+    // calendar, still assigned, still counted -- while bookings.cancel did sync it.
+    // Two routes to the same words, two different outcomes.
+    let job: string | null = null;
+    if (b.job && (status === "CANCELLED" || status === "COMPLETED") && b.job.status !== status) {
+      await db.job.update({ where: { id: b.job.id },
+        data: { status, ...(status === "COMPLETED" ? { completedAt: new Date() } : {}) } });
+      job = b.job.ref;
+    }
+
+    // A confirmed booking needs a job to work from. One taken online never had one:
+    // the public form deliberately creates a PENDING booking and nothing else, and
+    // confirming it here was the missing half -- the booking could never be
+    // assigned, worked or invoiced.
+    if (!b.job && status === "CONFIRMED") {
+      const made = await createJobForBooking(bookingId);
+      if (made) job = made.ref;
+    }
+    return { ...updated, jobSynced: job };
+  },
 });

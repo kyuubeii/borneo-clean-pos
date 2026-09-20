@@ -1,6 +1,13 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "borneo-clean", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3100 }
+    { "name": "borneo-clean", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 3100 },
+    {
+      "// preview": "A second dev server on its own port and its own build directory, so it cannot collide with the one on 3100 or with `npm run build`. Started by Claude when 3100 is occupied.",
+      "name": "borneo-clean-preview",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": ["-c", "NEXT_DIST_DIR=.next-preview npx next dev -p 3101"],
+      "port": 3101
+    }
   ]
 }

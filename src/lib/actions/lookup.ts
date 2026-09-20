@@ -48,11 +48,11 @@ defineAction({
   input: z.object({ query: z.string().min(1), limit: z.number().int().max(20).default(5) }),
   handler: async ({ query, limit }) => {
     const [customers, bookings, jobs, invoices, quotes] = await Promise.all([
-      db.customer.findMany({ where: { OR: [{ name: { contains: query } }, { phone: { contains: query } }, { email: { contains: query } }, { company: { contains: query } }] }, take: limit }),
-      db.booking.findMany({ where: { OR: [{ ref: { contains: query } }, { customer: { name: { contains: query } } }] }, take: limit, include: { customer: true }, orderBy: { startAt: "desc" } }),
-      db.job.findMany({ where: { OR: [{ ref: { contains: query } }, { customer: { name: { contains: query } } }] }, take: limit, include: { customer: true }, orderBy: { scheduledAt: "desc" } }),
-      db.invoice.findMany({ where: { OR: [{ ref: { contains: query } }, { customer: { name: { contains: query } } }] }, take: limit, include: { customer: true }, orderBy: { issuedAt: "desc" } }),
-      db.quote.findMany({ where: { OR: [{ ref: { contains: query } }, { customer: { name: { contains: query } } }] }, take: limit, include: { customer: true } }),
+      db.customer.findMany({ where: { OR: [{ name: { contains: query, mode: "insensitive" as const } }, { phone: { contains: query, mode: "insensitive" as const } }, { email: { contains: query, mode: "insensitive" as const } }, { company: { contains: query, mode: "insensitive" as const } }] }, take: limit }),
+      db.booking.findMany({ where: { OR: [{ ref: { contains: query, mode: "insensitive" as const } }, { customer: { name: { contains: query, mode: "insensitive" as const } } }] }, take: limit, include: { customer: true }, orderBy: { startAt: "desc" } }),
+      db.job.findMany({ where: { OR: [{ ref: { contains: query, mode: "insensitive" as const } }, { customer: { name: { contains: query, mode: "insensitive" as const } } }] }, take: limit, include: { customer: true }, orderBy: { scheduledAt: "desc" } }),
+      db.invoice.findMany({ where: { OR: [{ ref: { contains: query, mode: "insensitive" as const } }, { customer: { name: { contains: query, mode: "insensitive" as const } } }] }, take: limit, include: { customer: true }, orderBy: { issuedAt: "desc" } }),
+      db.quote.findMany({ where: { OR: [{ ref: { contains: query, mode: "insensitive" as const } }, { customer: { name: { contains: query, mode: "insensitive" as const } } }] }, take: limit, include: { customer: true } }),
     ]);
     return {
       customers: customers.map((c) => ({ id: c.id, name: c.name, phone: c.phone })),
