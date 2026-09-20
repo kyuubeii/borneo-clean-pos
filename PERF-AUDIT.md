@@ -321,6 +321,61 @@ touches the database or `/api`, so it costs nothing to have it far away.
 
 ---
 
+## 5b. Sidebar navigation (2026-09-20, commit `11ef3ff`)
+
+Clicking a nav item showed nothing for the length of a server round trip.
+Two separate causes, both now fixed.
+
+### No loading boundary
+
+The `(app)` segment had no `loading.tsx`, so the browser sat on the old page
+until the new payload arrived — the app looked frozen. `loading.tsx` now stands
+in for `<main>` the instant a link is clicked; the sidebar and header live in the
+layout and never move.
+
+This is the fix for the complaint. It does not make the payload arrive sooner —
+it makes the click register immediately, which is the part that felt broken.
+
+### Middleware authenticated over the network on every navigation
+
+`refreshSession` called `supabase.auth.getUser()`, which **always** issues
+`GET /auth/v1/user` — confirmed in `@supabase/auth-js`, `_getUser()` — so every
+page navigation carried a round trip to Supabase Auth before anything rendered.
+
+It now calls `getSession()`, which reads the session from the cookie and only
+goes to the network when the access token is within `EXPIRY_MARGIN_MS`
+(90 seconds, confirmed from the library's constants) of expiring.
+
+The standard objection to `getSession()` is that its session is not verified
+server-side. It does not apply here: this middleware makes no authorisation
+decision — it rotates the token and nothing else, as its own comment has always
+said. Every access decision is made in the action registry behind `getUser()`,
+which does verify.
+
+**Measured, and what the measurement cannot show.** Warm `curl -H 'RSC: 1'`
+against `/jobs` in production reads 0.24–0.31 s both before and after. That is
+not a null result — the probe is structurally blind to this change. With no
+session cookie, `getUser()` short-circuits on `AuthSessionMissingError` *before*
+the network request, so both versions were already network-free in that case.
+The saving only exists when a real session is present, and measuring it needs a
+signed-in browser. The mechanism is verified in the library source; the
+end-to-end gain is not measured.
+
+(An earlier 0.96 s sample was a cold start. Eight warm samples land at
+0.24–0.31 s, so there is no regression either.)
+
+### Prefetch deliberately left off
+
+Adding a loading boundary switches Next's automatic prefetching on for these
+dynamic routes, and all fifteen nav links sit in the desktop viewport at once —
+so every page view would fan out into fifteen server renders, each running the
+layout's `getUser()`. `prefetch={false}` on the nav links keeps that cost away.
+
+Worth revisiting only if the layout's per-request auth gets cheaper. The
+boundary already delivers the perceived speed.
+
+---
+
 ## 6. Original suggested order of work
 
 | # | Change | Effort | Expected |
