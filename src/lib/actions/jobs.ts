@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { db } from "../db";
 import { optionalId } from "../schema";
-import { defineAction, ActionError } from "../registry";
+import { defineAction, ActionError, type ActionCtx } from "../registry";
 import { startOfDay, endOfDay } from "../dates";
 import { notify } from "../notify";
 
@@ -11,6 +11,29 @@ const JOB_INCLUDE = {
   checklist: { orderBy: { sort: "asc" } }, photos: true,
   timeEntries: { include: { staff: true } }, expenses: true, invoice: true,
 } as const;
+
+/**
+ * A cleaner may only touch a job they are on.
+ *
+ * The reads were already careful about this -- jobs.get and lookup.byRef both
+ * refuse an unassigned cleaner, and jobs.list forces staffId to the caller. The
+ * writes were not, so a cleaner who could not *see* another cleaner's job could
+ * still complete it, cancel it or wipe its checklist by passing the id.
+ *
+ * Owners and admins are unaffected.
+ */
+async function assertMayTouchJob(jobId: string, ctx: ActionCtx) {
+  if (ctx.user.role !== "STAFF") return;
+  if (!ctx.user.staffId) throw new ActionError("No cleaner profile is linked to this account.");
+  const mine = await db.jobAssignment.findFirst({ where: { jobId, staffId: ctx.user.staffId } });
+  if (!mine) throw new ActionError("You are not assigned to this job.");
+}
+
+/** A cleaner may only ever act as themselves. */
+function assertIsSelf(staffId: string, ctx: ActionCtx) {
+  if (ctx.user.role !== "STAFF") return;
+  if (staffId !== ctx.user.staffId) throw new ActionError("You can only record time against yourself.");
+}
 
 defineAction({
   name: "jobs.list",
@@ -63,7 +86,8 @@ defineAction({
   description: "Change a job's status. Setting COMPLETED stamps the completion time and closes any open check-ins.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), status: z.enum(["SCHEDULED", "EN_ROUTE", "IN_PROGRESS", "COMPLETED", "CANCELLED"]) }),
-  handler: async ({ jobId, status }) => {
+  handler: async ({ jobId, status }, ctx) => {
+    await assertMayTouchJob(jobId, ctx);
     const j = await db.job.findUnique({ where: { id: jobId }, include: { customer: true } });
     if (!j) throw new ActionError("Job not found");
     if (status === "COMPLETED") {
@@ -114,7 +138,10 @@ defineAction({
   input: z.object({ jobId: z.string(), customerInstructions: z.string().optional(),
     internalNotes: z.string().optional(), staffNotes: z.string().optional(),
     materialCostCents: z.number().int().min(0).optional(), durationMin: z.number().int().min(15).optional() }),
-  handler: async ({ jobId, ...data }) => db.job.update({ where: { id: jobId }, data }),
+  handler: async ({ jobId, ...data }, ctx) => {
+    await assertMayTouchJob(jobId, ctx);
+    return db.job.update({ where: { id: jobId }, data });
+  },
 });
 
 defineAction({
@@ -122,7 +149,8 @@ defineAction({
   description: "Replace a job's checklist items.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), items: z.array(z.string()) }),
-  handler: async ({ jobId, items }) => {
+  handler: async ({ jobId, items }, ctx) => {
+    await assertMayTouchJob(jobId, ctx);
     await db.checklistItem.deleteMany({ where: { jobId } });
     if (items.length) await db.checklistItem.createMany({ data: items.map((label, sort) => ({ jobId, label, sort })) });
     return db.checklistItem.findMany({ where: { jobId }, orderBy: { sort: "asc" } });
@@ -134,7 +162,12 @@ defineAction({
   description: "Tick or untick a single checklist item on a job.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ itemId: z.string(), done: z.boolean() }),
-  handler: async ({ itemId, done }) => db.checklistItem.update({ where: { id: itemId }, data: { done } }),
+  handler: async ({ itemId, done }, ctx) => {
+    const item = await db.checklistItem.findUnique({ where: { id: itemId } });
+    if (!item) throw new ActionError("That checklist item no longer exists.");
+    await assertMayTouchJob(item.jobId, ctx);
+    return db.checklistItem.update({ where: { id: itemId }, data: { done } });
+  },
 });
 
 defineAction({
@@ -142,7 +175,10 @@ defineAction({
   description: "Attach a before/after photo or file to a job. The URL must already be uploaded.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), url: z.string(), kind: z.enum(["BEFORE", "AFTER", "ATTACHMENT"]).default("BEFORE"), caption: z.string().optional() }),
-  handler: async (i) => db.photo.create({ data: i }),
+  handler: async (i, ctx) => {
+    await assertMayTouchJob(i.jobId, ctx);
+    return db.photo.create({ data: i });
+  },
 });
 
 defineAction({
