@@ -7,17 +7,20 @@ import { useAction, Badge, Money, Empty, Modal, Field, callAction, toast, Confir
 import PageHeader from "@/components/PageHeader";
 import { useCan, ADMIN_UP } from "@/components/UserProvider";
 import { fmtDate, toInput } from "@/lib/dates";
+import InvoiceDocument, { MAX_DOCUMENT_LINES } from "@/components/InvoiceDocument";
 import { toCents } from "@/lib/money";
 
 export default function Quotes() {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [convert, setConvert] = useState<any>(null);
+  const [bill, setBill] = useState<any>(null);
   const [preview, setPreview] = useState<any>(null);
   const [editing, setEditing] = useState<any>(null);
   const [deleting, setDeleting] = useState<any>(null);
   const manage = useCan(ADMIN_UP);
   const { data, loading, error, refresh } = useAction<any[]>("quotes.list", { limit: 100 });
+  const biz = useAction<any>("settings.get", {});
 
   async function setStatus(q: any, status: string) {
     try { await callAction("quotes.updateStatus", { quoteId: q.id, status }); toast("Quote updated"); refresh(); }
@@ -53,7 +56,7 @@ export default function Quotes() {
                   <th className="th text-right">{t("common.actions")}</th></tr>
               </thead>
               <tbody className="divide-y divide-ink-50">
-                {data.map((q) => (
+                {data.map((q) => { const locked = !!(q.convertedBookingId || q.convertedInvoiceId); return (
                   <tr key={q.id}>
                     <td className="td whitespace-nowrap font-medium text-ink-900">{q.ref}</td>
                     <td className="td font-medium text-ink-800">{q.customer}</td>
@@ -63,15 +66,19 @@ export default function Quotes() {
                     <td className="td"><Badge status={q.status} /></td>
                     <td className="td text-right">
                       <div className="flex justify-end gap-1">
-                        {!q.convertedBookingId && q.status === "DRAFT" && <button onClick={() => setStatus(q, "SENT")} className="btn-ghost btn-sm">Mark sent</button>}
-                        {!q.convertedBookingId && q.status === "SENT" && <>
+                        {!locked && q.status === "DRAFT" && <button onClick={() => setStatus(q, "SENT")} className="btn-ghost btn-sm">Mark sent</button>}
+                        {!locked && q.status === "SENT" && <>
                           <button onClick={() => setStatus(q, "ACCEPTED")} className="btn-ghost btn-sm text-emerald-600">Accept</button>
                           <button onClick={() => setStatus(q, "DECLINED")} className="btn-ghost btn-sm text-red-600">Decline</button>
                         </>}
-                        {!q.convertedBookingId && q.status === "ACCEPTED" && <button onClick={() => setConvert(q)} className="btn-outline btn-sm">Book it</button>}
+                        {!locked && q.status === "ACCEPTED" && <>
+                          <button onClick={() => setConvert(q)} className="btn-outline btn-sm">Book it</button>
+                          <button onClick={() => setBill(q)} className="btn-outline btn-sm">Invoice it</button>
+                        </>}
                         {q.convertedBookingId && <Link className="btn-outline btn-sm" href={`/bookings/${q.convertedBookingId}`}>View booking</Link>}
+                        {q.convertedInvoiceId && <Link className="btn-outline btn-sm" href={`/invoices/${q.convertedInvoiceId}`}>View invoice</Link>}
                         <button className="btn-ghost btn-sm" onClick={async () => { try { setPreview(await callAction("quotes.get", { quoteId: q.id })); } catch (e: any) { toast(e.message, "err"); } }}>Preview</button>
-                        {manage && !q.convertedBookingId && (
+                        {manage && !locked && (
                           <>
                             <button onClick={() => openEdit(q)} className="btn-ghost btn-sm">{t("common.edit")}</button>
                             <button onClick={() => setDeleting(q)} title="Delete permanently"
@@ -83,23 +90,17 @@ export default function Quotes() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                ); })}
               </tbody>
             </table>
           </div>}
       </div>
 
-      <Modal open={!!preview} onClose={() => setPreview(null)} title={preview?.ref ?? "Quote"} wide>
-        {preview && <div className="space-y-3"><p className="font-semibold">{preview.customer.name}</p>
-          <p className="text-sm">Valid until: {preview.validUntil ? fmtDate(new Date(preview.validUntil)) : "—"}</p>
-          {preview.items.map((i: any) => <div key={i.id} className="flex justify-between gap-3 text-sm"><span>{i.name} × {i.qty}</span><Money cents={i.qty * i.priceCents} /></div>)}
-          <p>Discount: <Money cents={preview.discount} /> · Tax: <Money cents={preview.tax} /></p>
-          <p className="font-semibold">Total: <Money cents={preview.total} /></p><p className="whitespace-pre-line text-sm">{preview.notes}</p>
-        </div>}
-      </Modal>
+      <QuotePreview quote={preview} business={biz.data ?? {}} onClose={() => setPreview(null)} />
       <QuoteForm open={open} onClose={() => setOpen(false)} onDone={refresh} />
       <QuoteForm open={!!editing} initial={editing} onClose={() => setEditing(null)} onDone={refresh} />
       <ConvertModal quote={convert} onClose={() => setConvert(null)} onDone={refresh} />
+      <BillModal quote={bill} onClose={() => setBill(null)} onDone={refresh} defaultDueDays={biz.data?.["invoice.dueDays"]} />
 
       <ConfirmDelete
         open={!!deleting} onClose={() => setDeleting(null)} onDone={refresh}
@@ -252,6 +253,88 @@ function ConvertModal({ quote, onClose, onDone }: any) {
         <Field label="Schedule the visit for"><input type="datetime-local" className="input" value={when} onChange={(e) => setWhen(e.target.value)} /></Field>
         <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
           <button onClick={go} disabled={busy} className="btn-primary">{t("common.create")}</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * The quotation as the customer receives it.
+ *
+ * The same A4 sheet the invoice prints on, so a quote and the invoice that
+ * follows it are visibly one document family. Print goes straight from here.
+ */
+function QuotePreview({ quote, business, onClose }: any) {
+  const t = useT();
+  const [clipped, setClipped] = useState(false);
+  if (!quote) return null;
+  return (
+    <Modal open={!!quote} onClose={onClose} title={quote.ref} wide>
+      <div className="space-y-3">
+        {clipped && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800">
+            This quotation has {quote.items.length} lines and no longer fits the one-page A4
+            format (up to {MAX_DOCUMENT_LINES} fit). Printing it will cut off the bottom of
+            the sheet — shorten the descriptions, or split the work across two quotations.
+          </p>
+        )}
+        <InvoiceDocument
+          kind="QUOTATION" docRef={quote.ref} customer={quote.customer}
+          issuedAt={quote.issuedAt} dueAt={quote.validUntil} items={quote.items}
+          discountCents={quote.discountCents} taxRateBp={quote.taxRateBp}
+          notes={quote.notes} business={business} onOverflowChange={setClipped}
+        />
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="btn-outline">{t("common.close")}</button>
+          <button onClick={() => window.print()} className="btn-primary">{t("common.print")}</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Bills an accepted quote without scheduling it first.
+ *
+ * The other route — "Book it" — is for work that has to be done before it can be
+ * charged for. This one is for work that is charged up front or has already
+ * happened, and it copies the quote's agreed lines, discount and tax verbatim.
+ */
+function BillModal({ quote, onClose, onDone, defaultDueDays }: any) {
+  const t = useT();
+  const [dueDays, setDueDays] = useState("14");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (quote) setDueDays(String(parseInt(defaultDueDays ?? "", 10) || 14)); }, [quote, defaultDueDays]);
+  if (!quote) return null;
+
+  async function go() {
+    const days = parseInt(dueDays, 10);
+    if (!Number.isInteger(days) || days < 0) return toast("Enter a whole number of days", "err");
+    setBusy(true);
+    try {
+      const r = await callAction("quotes.convertToInvoice", { quoteId: quote.id, dueDays: days });
+      toast(r.existing ? `This quote is already invoiced as ${r.ref}` : `Invoice ${r.ref} raised`);
+      onDone(); onClose();
+      location.assign(`/invoices/${r.invoiceId}`);
+    } catch (e: any) { toast(humanError(e.message), "err"); } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal open={!!quote} onClose={() => { if (!busy) onClose(); }} title="Invoice this quote">
+      <div className="space-y-3">
+        <p className="text-sm text-ink-600">{quote.ref} · {quote.customer} · <Money cents={quote.total} /></p>
+        <Field label="Payment terms (days)" hint="How long the customer has to pay, counted from today.">
+          <input className="input" inputMode="numeric" value={dueDays} onChange={(e) => setDueDays(e.target.value)} />
+        </Field>
+        <p className="rounded-lg bg-ink-50 px-3 py-2.5 text-xs text-ink-500">
+          The quote's line items, discount and tax are copied onto the invoice, which
+          references {quote.ref}. Use <strong>Book it</strong> instead if the work still
+          needs scheduling — that invoices from the job once it is done.
+        </p>
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
+          <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : "Raise invoice"}</button>
+        </div>
       </div>
     </Modal>
   );

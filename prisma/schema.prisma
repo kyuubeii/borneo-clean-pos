@@ -244,6 +244,11 @@ model Quote {
   taxRateBp  Int      @default(0) // basis points
   notes      String?
   convertedBookingId String?
+  // Set when the quote has been turned into an invoice directly, rather than
+  // scheduled as a booking first. Deliberately not a foreign key, to match
+  // convertedBookingId: a deleted invoice leaves this pointing at nothing,
+  // and the conversion re-checks that the invoice still exists.
+  convertedInvoiceId String?
   createdAt  DateTime @default(now())
   items      QuoteItem[]
   @@index([customerId])

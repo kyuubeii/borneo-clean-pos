@@ -221,7 +221,7 @@ defineAction({
   category: "Quotes", roles: [...ADMIN], readOnly: true,
   input: z.object({ quoteId: z.string() }),
   handler: async ({ quoteId }) => {
-    const q = await db.quote.findUnique({ where: { id: quoteId }, include: { customer: true, items: true } });
+    const q = await db.quote.findUnique({ where: { id: quoteId }, include: { customer: { include: { addresses: true } }, items: true } });
     if (!q) throw new ActionError("Quote not found");
     return { ...q, ...totals(q.items, q.discountCents, q.taxRateBp) };
   },
@@ -241,6 +241,10 @@ defineAction({
     const q = await db.quote.findUnique({ where: { id: quoteId } });
     if (!q) throw new ActionError("Quote not found");
     if (q.convertedBookingId) throw new ActionError("This quote has already been turned into a booking, so it can no longer be edited. Edit the booking instead.");
+    if (q.convertedInvoiceId) {
+      const inv = await db.invoice.findUnique({ where: { id: q.convertedInvoiceId }, select: { ref: true } });
+      if (inv) throw new ActionError(`This quote has already been invoiced as ${inv.ref}, so it can no longer be edited. Edit the invoice instead.`);
+    }
     if (items) {
       await db.quoteItem.deleteMany({ where: { quoteId } });
       await db.quoteItem.createMany({ data: items.map((i) => ({ ...i, quoteId })) });
@@ -264,6 +268,10 @@ defineAction({
     if (q.convertedBookingId) {
       const booking = await db.booking.findUnique({ where: { id: q.convertedBookingId }, select: { ref: true } });
       if (booking) throw new ActionError(`This quote has already been turned into booking ${booking.ref}. Cancel that booking instead.`);
+    }
+    if (q.convertedInvoiceId) {
+      const inv = await db.invoice.findUnique({ where: { id: q.convertedInvoiceId }, select: { ref: true } });
+      if (inv) throw new ActionError(`This quote has already been invoiced as ${inv.ref}. Void that invoice instead.`);
     }
     await db.quote.delete({ where: { id: quoteId } });
     return { deleted: q.ref };

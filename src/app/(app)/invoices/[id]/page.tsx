@@ -5,8 +5,9 @@ import { useT } from "@/components/I18nProvider";
 import { useAction, Badge, Money, Empty, Modal, Field, callAction, toast, humanError } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import { useCan, ADMIN_UP } from "@/components/UserProvider";
-import { fmtDate, fmtDateTime } from "@/lib/dates";
+import { fmtDateTime } from "@/lib/dates";
 import { toCents } from "@/lib/money";
+import InvoiceDocument, { MAX_DOCUMENT_LINES } from "@/components/InvoiceDocument";
 
 export default function InvoiceDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -15,6 +16,7 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
   const biz = useAction<any>("settings.get", {});
   const [pay, setPay] = useState(false);
   const [refund, setRefund] = useState(false);
+  const [clipped, setClipped] = useState(false);
   const canRefund = useCan(ADMIN_UP);
 
   if (loading) return <p className="text-sm text-ink-400">{t("common.loading")}</p>;
@@ -37,69 +39,38 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
           </>} />
       </div>
 
-      <div className="card mx-auto max-w-3xl p-6 sm:p-8">
-        <div className="flex flex-wrap items-start justify-between gap-4 border-b border-ink-100 pb-5">
-          <div>
-            <p className="text-lg font-semibold tracking-tight text-ink-900">{s["business.name"] ?? "Borneo Clean Services"}</p>
-            <p className="mt-1 whitespace-pre-line text-xs leading-relaxed text-ink-500">{s["business.address"]}</p>
-            <p className="text-xs text-ink-500">{s["business.phone"]} · {s["business.email"]}</p>
-            {s["business.regNo"] && <p className="text-xs text-ink-400">{s["business.regNo"]}</p>}
-          </div>
-          <div className="text-right">
-            <p className="text-2xl font-semibold tracking-tight text-ink-900">INVOICE</p>
-            <p className="mt-0.5 text-sm font-medium text-ink-600">{inv.ref}</p>
-            <div className="mt-2"><Badge status={inv.status} label={t(`inv.status.${inv.status}`)} /></div>
-          </div>
+      {clipped && (
+        <div className="no-print mx-auto max-w-3xl rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800">
+          This invoice has {inv.items.length} lines and no longer fits the one-page A4 format
+          (up to {MAX_DOCUMENT_LINES} fit). Printing it will cut off the bottom of the sheet —
+          shorten the descriptions, or split it across two invoices.
         </div>
+      )}
 
-        <div className="grid gap-4 py-5 sm:grid-cols-3">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">Bill to</p>
-            <p className="mt-1 text-sm font-medium text-ink-900">{inv.customer.name}</p>
-            {inv.customer.company && <p className="text-xs text-ink-500">{inv.customer.company}</p>}
-            {inv.customer.email && <p className="text-xs text-ink-500">{inv.customer.email}</p>}
-            {inv.customer.phone && <p className="text-xs text-ink-500">{inv.customer.phone}</p>}
+      <div className="mx-auto max-w-3xl">
+        <InvoiceDocument
+          kind="INVOICE" docRef={inv.ref} customer={inv.customer}
+          issuedAt={inv.issuedAt} dueAt={inv.dueAt} items={inv.items}
+          discountCents={inv.discountCents} taxRateBp={inv.taxRateBp}
+          notes={inv.notes} business={s} onOverflowChange={setClipped}
+        />
+      </div>
+
+      {/* What is owed after payments. The printed sheet states the amount due on
+          the day it was raised, so this belongs beside it rather than on it. */}
+      <div className="no-print card mx-auto max-w-3xl card-pad">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="section-title">{t("inv.balance")}</p>
+          <Badge status={inv.status} label={t(`inv.status.${inv.status}`)} />
+        </div>
+        <dl className="mt-3 space-y-1.5 text-sm">
+          <Line k={t("common.total")} v={inv.total} />
+          <Line k={t("inv.paid")} v={inv.paid} tone="text-emerald-600" />
+          <div className="flex justify-between border-t border-ink-100 pt-1.5">
+            <dt className="font-semibold">{t("inv.balance")}</dt>
+            <dd className={`text-base font-semibold ${inv.balance > 0 ? "text-amber-600" : "text-emerald-600"}`}><Money cents={inv.balance} /></dd>
           </div>
-          <div><p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">{t("inv.issued")}</p>
-            <p className="mt-1 text-sm text-ink-700">{fmtDate(new Date(inv.issuedAt))}</p></div>
-          <div><p className="text-[11px] font-semibold uppercase tracking-wide text-ink-400">{t("inv.dueDate")}</p>
-            <p className="mt-1 text-sm text-ink-700">{inv.dueAt ? fmtDate(new Date(inv.dueAt)) : "—"}</p></div>
-        </div>
-
-        <table className="w-full">
-          <thead><tr className="border-y border-ink-100">
-            <th className="th">Description</th><th className="th text-center">Qty</th>
-            <th className="th text-right">Unit</th><th className="th text-right">{t("common.amount")}</th></tr></thead>
-          <tbody className="divide-y divide-ink-50">
-            {inv.items.map((i: any) => (
-              <tr key={i.id}>
-                <td className="td">{i.name}</td>
-                <td className="td text-center tabular-nums">{i.qty}</td>
-                <td className="td text-right"><Money cents={i.priceCents} /></td>
-                <td className="td text-right font-medium"><Money cents={i.qty * i.priceCents} /></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="mt-5 flex justify-end">
-          <dl className="w-full max-w-xs space-y-1.5 text-sm">
-            <Line k={t("inv.subtotal")} v={inv.subtotal} />
-            {inv.discount > 0 && <Line k={t("inv.discount")} v={-inv.discount} />}
-            {inv.tax > 0 && <Line k={`${t("inv.tax")} (${inv.taxRateBp / 100}%)`} v={inv.tax} />}
-            <div className="flex justify-between border-t border-ink-100 pt-1.5">
-              <dt className="font-semibold">{t("common.total")}</dt>
-              <dd className="font-semibold"><Money cents={inv.total} /></dd>
-            </div>
-            <Line k={t("inv.paid")} v={inv.paid} tone="text-emerald-600" />
-            <div className="flex justify-between border-t border-ink-100 pt-1.5">
-              <dt className="font-semibold">{t("inv.balance")}</dt>
-              <dd className={`text-base font-semibold ${inv.balance > 0 ? "text-amber-600" : "text-emerald-600"}`}><Money cents={inv.balance} /></dd>
-            </div>
-          </dl>
-        </div>
-
-        {s["invoice.footer"] && <p className="mt-6 border-t border-ink-100 pt-4 text-xs text-ink-400">{s["invoice.footer"]}</p>}
+        </dl>
       </div>
 
       {inv.payments.length > 0 && (

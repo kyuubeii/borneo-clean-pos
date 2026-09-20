@@ -35,7 +35,8 @@ defineAction({
     const rows = await db.quote.findMany({ where: { ...(status ? { status } : {}), ...(customerId ? { customerId } : {}) },
       orderBy: { issuedAt: "desc" }, take: limit, include: { customer: true, items: true } });
     return rows.map((q) => ({ id: q.id, ref: q.ref, customer: q.customer.name, status: q.status,
-      convertedBookingId: q.convertedBookingId, issuedAt: q.issuedAt, validUntil: q.validUntil, ...totals(q.items, q.discountCents, q.taxRateBp) }));
+      convertedBookingId: q.convertedBookingId, convertedInvoiceId: q.convertedInvoiceId,
+      issuedAt: q.issuedAt, validUntil: q.validUntil, ...totals(q.items, q.discountCents, q.taxRateBp) }));
   },
 });
 
@@ -67,6 +68,7 @@ defineAction({
     const q = await db.quote.findUnique({ where: { id: quoteId } });
     if (!q) throw new ActionError("Quote not found");
     if (q.convertedBookingId) throw new ActionError("This quote is already booked. Open the linked booking.");
+    if (q.convertedInvoiceId) throw new ActionError("This quote has already been invoiced. Open the linked invoice.");
     return db.quote.update({ where: { id: quoteId }, data: { status } });
   },
 });
@@ -107,6 +109,43 @@ defineAction({
   }),
 });
 
+defineAction({
+  name: "quotes.convertToInvoice",
+  description: "Bill an accepted quotation directly, without scheduling a visit first. Copies its line items, discount, tax and notes onto a new invoice. Use for 'invoice this quote'.",
+  category: "Quotes", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
+  input: z.object({ quoteId: z.string(), dueDays: z.number().int().min(0).default(14) }),
+  handler: async ({ quoteId, dueDays }) => {
+    const q = await db.quote.findUnique({ where: { id: quoteId }, include: { items: true, customer: true } });
+    if (!q) throw new ActionError("Quote not found");
+
+    // Like convertedBookingId, this is a plain column rather than a foreign key,
+    // so it can name an invoice that has since been deleted. A quote whose
+    // invoice is gone may be billed again; one whose invoice is still there
+    // opens it instead of raising a second bill for the same work.
+    if (q.convertedInvoiceId) {
+      const prior = await db.invoice.findUnique({ where: { id: q.convertedInvoiceId }, select: { id: true, ref: true } });
+      if (prior) return { invoiceId: prior.id, ref: prior.ref, quoteRef: q.ref, existing: true };
+    }
+    // A quote that became a booking is billed through its job, so that the work
+    // is invoiced once, when it has actually been done.
+    if (q.convertedBookingId) {
+      const booking = await db.booking.findUnique({ where: { id: q.convertedBookingId }, select: { ref: true } });
+      if (booking) throw new ActionError(`This quote is scheduled as booking ${booking.ref}. Invoice it from the completed job, so the work is not billed twice.`);
+    }
+    if (q.status !== "ACCEPTED") throw new ActionError("Accept the quote before invoicing it.");
+
+    const inv = await db.invoice.create({ data: {
+      ref: await nextRef("INV", "invoice"), customerId: q.customerId, status: "SENT",
+      discountCents: q.discountCents, taxRateBp: q.taxRateBp, dueAt: addDays(new Date(), dueDays),
+      notes: `Quotation reference: ${q.ref}${q.notes ? `\n${q.notes}` : ""}`,
+      items: { create: q.items.map((i) => ({ name: i.name, qty: i.qty, priceCents: i.priceCents })) },
+    }, include: { items: true } });
+    await db.quote.update({ where: { id: quoteId }, data: { convertedInvoiceId: inv.id } });
+    await notify({ type: "INVOICE", title: `Invoice ${inv.ref} raised`, body: `${q.customer.name} \u00b7 quote ${q.ref}`, link: `/invoices/${inv.id}` });
+    return { invoiceId: inv.id, ref: inv.ref, quoteRef: q.ref, ...totals(inv.items, q.discountCents, q.taxRateBp) };
+  },
+});
+
 /* --------------------------------- Invoices -------------------------------- */
 
 defineAction({
@@ -142,7 +181,7 @@ defineAction({
   category: "Invoices", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ invoiceId: z.string() }),
   handler: async ({ invoiceId }) => {
-    const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { customer: true, items: true, payments: true, jobs: true } });
+    const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { customer: { include: { addresses: true } }, items: true, payments: true, jobs: true } });
     if (!inv) throw new ActionError("Invoice not found");
     return { ...inv, ...invoiceTotals(inv) };
   },

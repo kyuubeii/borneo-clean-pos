@@ -36,14 +36,38 @@ export default function Settings() {
     <div className="max-w-3xl space-y-4">
       <PageHeader title={t("nav.settings")} />
 
-      <Card title="Business profile" onSave={() => save(["business.name","business.email","business.phone","business.address","business.regNo"])} busy={busy}>
-        <Field label="Business name"><input className="input" value={f["business.name"] ?? ""} onChange={set("business.name")} /></Field>
+      <Card title="Business profile" onSave={() => save(["business.name","business.tagline","business.email","business.phone","business.address","business.regNo","business.logoUrl"])} busy={busy}>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Business name"><input className="input" value={f["business.name"] ?? ""} onChange={set("business.name")} /></Field>
+          <Field label="Tagline" hint="Printed under the business name on invoices and quotations.">
+            <input className="input" value={f["business.tagline"] ?? ""} onChange={set("business.tagline")} placeholder="Cleaning Services" /></Field>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t("common.email")}><input className="input" value={f["business.email"] ?? ""} onChange={set("business.email")} /></Field>
           <Field label={t("common.phone")}><input className="input" value={f["business.phone"] ?? ""} onChange={set("business.phone")} /></Field>
         </div>
         <Field label={t("common.address")}><textarea className="input" rows={2} value={f["business.address"] ?? ""} onChange={set("business.address")} /></Field>
         <Field label="Registration number"><input className="input" value={f["business.regNo"] ?? ""} onChange={set("business.regNo")} /></Field>
+        <Field label="Logo URL" hint="Shown at the top left of the printed document. Leave blank for initials.">
+          <input className="input" value={f["business.logoUrl"] ?? ""} onChange={set("business.logoUrl")} placeholder="https://…" /></Field>
+      </Card>
+
+      {/*
+        * What a customer needs in order to pay, printed in the panel at the foot
+        * of every invoice. It is not used anywhere else, and an unset field
+        * prints as a dash rather than disappearing, so a half-filled panel is
+        * visible rather than quietly wrong.
+        */}
+      <Card title="Payment details on invoices" onSave={() => save(["business.bank","business.accountName","business.accountNumber","invoice.paymentTerms","quote.paymentTerms"])} busy={busy}>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Bank"><input className="input" value={f["business.bank"] ?? ""} onChange={set("business.bank")} placeholder="AmBank" /></Field>
+          <Field label="Account name"><input className="input" value={f["business.accountName"] ?? ""} onChange={set("business.accountName")} /></Field>
+          <Field label="Account number"><input className="input" value={f["business.accountNumber"] ?? ""} onChange={set("business.accountNumber")} /></Field>
+        </div>
+        <Field label="Invoice payment terms" hint="Printed in the terms row and the payment panel.">
+          <input className="input" value={f["invoice.paymentTerms"] ?? ""} onChange={set("invoice.paymentTerms")} placeholder="Due immediately upon receipt" /></Field>
+        <Field label="Quotation payment terms">
+          <input className="input" value={f["quote.paymentTerms"] ?? ""} onChange={set("quote.paymentTerms")} placeholder="To be agreed upon acceptance" /></Field>
       </Card>
 
       <Card title="Invoice defaults" onSave={() => save(["invoice.taxRateBp","invoice.dueDays","invoice.footer"])} busy={busy}>
