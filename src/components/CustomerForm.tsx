@@ -15,6 +15,12 @@ import { Modal, Field, callAction, toast, humanError } from "@/components/ui";
  * On an edit, a box left empty is sent as "" rather than dropped, which the
  * registry reads as "clear this". Dropping it is what made clearing a field
  * report success and change nothing.
+ *
+ * The flip side: an edit sends every field on the form whether or not it was
+ * touched, so `initial` must be a record that actually carries all of them.
+ * Both callers do -- customers.search and customers.get each return name,
+ * phone, email, company and notes -- but a caller passing a thinner record
+ * would blank whatever it left out.
  */
 
 const BLANK_CUSTOMER = { name: "", phone: "", email: "", company: "", line1: "", city: "Kuching", notes: "" };
