@@ -54,8 +54,7 @@ defineAction({
     // Profit must compare like with like: expenses are recorded on the date they are
     // incurred, so revenue has to be sales earned, not cash collected. Mixing the two
     // (cash in vs accrued costs) understates profit whenever customers pay late.
-    const billable = jobs.filter((j) => j.status !== "CANCELLED");
-    const salesCents = billable.reduce((a, j) => a + j.revenueCents, 0);
+    const salesCents = jobs.filter((j) => j.status !== "CANCELLED").reduce((a, j) => a + j.revenueCents, 0);
     const profit = salesCents - expenseCents - labour;
     return {
       from: gte, to: lte,
@@ -66,10 +65,7 @@ defineAction({
       jobsScheduled: jobs.length, jobsCompleted: jobs.filter((j) => j.status === "COMPLETED").length,
       jobsCancelled: jobs.filter((j) => j.status === "CANCELLED").length,
       newCustomers,
-      // Averaged over the same jobs `salesCents` is built from. This used to divide
-      // the revenue of every job, cancelled ones included, by the count of every
-      // job -- two different definitions of the month's work, three lines apart.
-      avgJobValueCents: billable.length ? Math.round(salesCents / billable.length) : 0,
+      avgJobValueCents: jobs.length ? Math.round(jobs.reduce((a, j) => a + j.revenueCents, 0) / jobs.length) : 0,
     };
   },
 });

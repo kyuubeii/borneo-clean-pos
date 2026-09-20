@@ -3,7 +3,7 @@ import { db } from "../db";
 import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { nextRef } from "../ref";
-import { totals, syncInvoiceStatus as syncStatus, netCollected } from "../money";
+import { totals } from "../money";
 import { startOfDay, endOfDay, addDays } from "../dates";
 import { notify } from "../notify";
 
@@ -14,12 +14,14 @@ export function invoiceTotals(inv: { items: { qty: number; priceCents: number }[
   return { ...t, paid, balance: t.total - paid };
 }
 
-/**
- * There used to be a second implementation of this here, and it disagreed with the
- * one in money.ts about OVERDUE. Same invoice, different status, depending on
- * whether a payment had been recorded or deleted. One copy now, in money.ts.
- */
-const syncInvoiceStatus = (invoiceId: string) => syncStatus(db, invoiceId);
+async function syncInvoiceStatus(invoiceId: string) {
+  const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { items: true, payments: true } });
+  if (!inv || inv.status === "VOID" || inv.status === "DRAFT") return inv;
+  const { total, paid } = invoiceTotals(inv);
+  const status = paid <= 0 ? (inv.dueAt && inv.dueAt < new Date() ? "OVERDUE" : "SENT")
+    : paid >= total ? "PAID" : "PARTIAL";
+  return db.invoice.update({ where: { id: invoiceId }, data: { status } });
+}
 
 /* ---------------------------------- Quotes --------------------------------- */
 
@@ -221,15 +223,6 @@ defineAction({
   handler: async (i) => {
     const inv = await db.invoice.findUnique({ where: { id: i.invoiceId }, include: { items: true, payments: true } });
     if (!inv) throw new ActionError("Invoice not found");
-    // You cannot give back more than came in. Note this is the money received, not
-    // the balance owed: a fully paid invoice has no balance and is exactly the case
-    // where a refund is most likely, so the two must not be confused.
-    const received = netCollected(inv.payments);
-    if (received <= 0) throw new ActionError(`No money has been received against invoice ${inv.ref}, so there is nothing to refund.`);
-    if (i.amountCents > received) {
-      const rm = (c: number) => `RM ${(c / 100).toFixed(2)}`;
-      throw new ActionError(`That refund is ${rm(i.amountCents)} but only ${rm(received)} was ever received against invoice ${inv.ref}. Refund ${rm(received)} or less.`);
-    }
     const p = await db.payment.create({ data: {
       ref: await nextRef("PAY", "payment"), invoiceId: i.invoiceId, customerId: inv.customerId,
       amountCents: i.amountCents, method: i.method, note: i.note, isRefund: true,

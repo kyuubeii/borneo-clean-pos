@@ -6,6 +6,7 @@ public/uploads/*
 !public/uploads/.gitkeep
 tsconfig.tsbuildinfo
 .next-build
+.next-preview
 .env
 .env*.local
 .vercel

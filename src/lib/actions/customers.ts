@@ -18,8 +18,8 @@ defineAction({
     // staff.list and services.list already behave.
     const active = includeInactive ? {} : { active: true };
     const where = query ? { ...active, OR: [
-      { name: { contains: query, mode: "insensitive" as const } }, { email: { contains: query, mode: "insensitive" as const } },
-      { phone: { contains: query, mode: "insensitive" as const } }, { company: { contains: query, mode: "insensitive" as const } },
+      { name: { contains: query } }, { email: { contains: query } },
+      { phone: { contains: query } }, { company: { contains: query } },
     ] } : active;
     const rows = await db.customer.findMany({ where, take: limit, orderBy: { name: "asc" }, include: { addresses: true } });
     return rows.map((c) => ({ id: c.id, name: c.name, email: c.email, phone: c.phone, company: c.company, notes: c.notes,
