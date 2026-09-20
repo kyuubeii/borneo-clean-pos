@@ -29,3 +29,20 @@ export const optionalText = () =>
     if (typeof v !== "string") return v ?? undefined;
     return v.trim() === "" ? undefined : v;
   }, z.string().optional());
+
+/**
+ * Free text a form can clear.
+ *
+ * `optionalText` treats blank as "I am not sending this field", which is right
+ * for the assistant but wrong for an edit form: someone who empties the email
+ * box means "remove it". Blank becomes null so Prisma actually writes it, and
+ * the key is still omittable for callers that are not touching the field.
+ *
+ * Only for columns that are nullable in the schema.
+ */
+export const clearableText = () =>
+  z.preprocess((v) => {
+    if (v === null) return null;
+    if (typeof v !== "string") return v ?? undefined;
+    return v.trim() === "" ? null : v.trim();
+  }, z.string().nullable().optional());

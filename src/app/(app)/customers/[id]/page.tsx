@@ -1,18 +1,48 @@
 "use client";
-import { use } from "react";
+import { use, useState } from "react";
 import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Badge, Money, Empty } from "@/components/ui";
+import { useAction, Badge, Money, Empty, callAction, toast, humanError, ConfirmDelete } from "@/components/ui";
+import { CustomerForm, AddressForm } from "@/components/CustomerForm";
 import PageHeader from "@/components/PageHeader";
+import { useCan, ADMIN_UP } from "@/components/UserProvider";
 import { fmtDateTime, fmtDate } from "@/lib/dates";
 
 export default function CustomerDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const t = useT();
-  const { data: c, loading } = useAction<any>("customers.get", { customerId: id });
+  const { data: c, loading, refresh } = useAction<any>("customers.get", { customerId: id });
+  // customers.update / addAddress / updateAddress / deleteAddress are all
+  // ADMIN_UP in the registry. Only customers.delete is owner-only, and that
+  // stays on the list screen.
+  const canEdit = useCan(ADMIN_UP);
+
+  const [editing, setEditing] = useState(false);
+  const [addingAddress, setAddingAddress] = useState(false);
+  const [editingAddress, setEditingAddress] = useState<any>(null);
+  const [deletingAddress, setDeletingAddress] = useState<any>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
 
   if (loading) return <p className="text-sm text-ink-400">{t("common.loading")}</p>;
   if (!c) return <Empty text="Customer not found" />;
+
+  async function makePrimary(a: any) {
+    setBusyId(a.id);
+    try {
+      await callAction("customers.updateAddress", { addressId: a.id, isPrimary: true });
+      toast(`${a.label} is now the primary address`);
+      refresh();
+    } catch (e: any) { toast(humanError(e.message), "err"); } finally { setBusyId(null); }
+  }
+
+  async function setActive(active: boolean) {
+    setBusyId(c.id);
+    try {
+      await callAction("customers.update", { customerId: c.id, active });
+      toast(active ? `${c.name} reactivated` : `${c.name} deactivated — history kept`);
+      refresh();
+    } catch (e: any) { toast(humanError(e.message), "err"); } finally { setBusyId(null); }
+  }
 
   const totalPaid = c.payments.reduce((a: number, p: any) => a + (p.isRefund ? -p.amountCents : p.amountCents), 0);
   const outstanding = c.invoices.reduce((a: number, i: any) => {
@@ -24,7 +54,23 @@ export default function CustomerDetail({ params }: { params: Promise<{ id: strin
   return (
     <div className="space-y-4">
       <PageHeader title={c.name} subtitle={c.company ?? undefined}
-        actions={<Link href="/customers" className="btn-outline btn-sm">{t("common.back")}</Link>} />
+        actions={<>
+          {canEdit && <>
+            <button onClick={() => setEditing(true)} className="btn-outline btn-sm">{t("common.edit")}</button>
+            <button onClick={() => setActive(c.active === false)} disabled={busyId === c.id}
+              className="btn-outline btn-sm whitespace-nowrap disabled:opacity-50">
+              {c.active === false ? "Reactivate" : "Deactivate"}
+            </button>
+          </>}
+          <Link href="/customers" className="btn-outline btn-sm">{t("common.back")}</Link>
+        </>} />
+
+      {c.active === false && (
+        <div className="rounded-lg border border-ink-200 bg-ink-50 px-3 py-2 text-xs text-ink-600">
+          <strong>Deactivated.</strong> Everything here is kept, but this customer no longer
+          appears when you start a new booking or quote.
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="card card-pad">
@@ -40,13 +86,37 @@ export default function CustomerDetail({ params }: { params: Promise<{ id: strin
         </div>
 
         <div className="card card-pad lg:col-span-2">
-          <p className="section-title mb-3">Service addresses</p>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <p className="section-title">Service addresses</p>
+            {canEdit && (
+              <button onClick={() => setAddingAddress(true)} className="btn-outline btn-sm">
+                {t("common.add")}
+              </button>
+            )}
+          </div>
           <div className="space-y-2">
-            {c.addresses.map((a: any) => (
+            {!c.addresses.length ? <Empty text="No address on file yet" />
+              // Primary first: it is the one a new booking will default to.
+              : [...c.addresses].sort((x: any, y: any) => Number(!!y.isPrimary) - Number(!!x.isPrimary)).map((a: any) => (
               <div key={a.id} className="rounded-lg border border-ink-100 p-2.5">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-ink-700">{a.label}</span>
-                  {a.isPrimary && <span className="badge bg-brand-50 text-brand-600">Primary</span>}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-ink-700">{a.label}</span>
+                    {a.isPrimary && <span className="badge bg-brand-50 text-brand-600">Primary</span>}
+                  </div>
+                  {canEdit && (
+                    <div className="flex items-center gap-1.5">
+                      {!a.isPrimary && (
+                        <button onClick={() => makePrimary(a)} disabled={busyId === a.id}
+                          className="btn-outline btn-sm whitespace-nowrap disabled:opacity-50">Make primary</button>
+                      )}
+                      <button onClick={() => setEditingAddress(a)} className="btn-outline btn-sm">{t("common.edit")}</button>
+                      <button onClick={() => setDeletingAddress(a)} title="Remove this address"
+                        className="rounded-lg border border-ink-200 p-1.5 text-ink-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <p className="mt-0.5 text-sm text-ink-600">{[a.line1, a.line2, a.city, a.postcode, a.state].filter(Boolean).join(", ")}</p>
                 {a.accessNotes && <p className="mt-1 text-[11px] text-ink-400">🔑 {a.accessNotes}</p>}
@@ -82,6 +152,25 @@ export default function CustomerDetail({ params }: { params: Promise<{ id: strin
           })}
         </Panel>
       </div>
+
+      <CustomerForm open={editing} initial={editing ? c : undefined}
+        onClose={() => setEditing(false)} onDone={refresh} />
+      <AddressForm open={addingAddress} customerId={c.id}
+        onClose={() => setAddingAddress(false)} onDone={refresh} />
+      <AddressForm open={!!editingAddress} customerId={c.id} initial={editingAddress}
+        onClose={() => setEditingAddress(null)} onDone={refresh} />
+
+      <ConfirmDelete
+        open={!!deletingAddress} onClose={() => setDeletingAddress(null)} onDone={refresh}
+        title="Remove this address"
+        action="customers.deleteAddress" input={{ addressId: deletingAddress?.id }}
+        verb="Remove">
+        <strong>{deletingAddress?.label}</strong> &mdash; {deletingAddress?.line1} &mdash; is removed
+        from {c.name}&rsquo;s record.
+        <br /><br />
+        It only works while nothing points at it. Once a booking or a job has happened there,
+        the address has to stay so past work still says where it was done &mdash; edit it instead.
+      </ConfirmDelete>
     </div>
   );
 }

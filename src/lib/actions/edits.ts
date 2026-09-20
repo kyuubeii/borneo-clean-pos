@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { db } from "../db";
-import { optionalId, nullableId, optionalText } from "../schema";
+import { optionalId, nullableId, optionalText, clearableText } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { totals, syncInvoiceStatus, fmt } from "../money";
 
@@ -357,9 +357,12 @@ defineAction({
   name: "customers.updateAddress",
   description: "Edit one of a customer's service addresses, including its access notes.",
   category: "Customers", roles: [...ADMIN],
-  input: z.object({ addressId: z.string(), label: z.string().optional(), line1: z.string().optional(),
-    line2: z.string().optional(), city: z.string().optional(), state: z.string().optional(),
-    postcode: z.string().optional(), accessNotes: z.string().optional(), isPrimary: z.boolean().optional() }),
+  // Same rule as customers.update: everything optional on the record can be
+  // cleared with an empty string, so the form can take a stale postcode or a
+  // door code that changed off the address. line1 is what makes it an address.
+  input: z.object({ addressId: z.string(), label: z.string().min(1).optional(), line1: z.string().min(1).optional(),
+    line2: clearableText(), city: clearableText(), state: clearableText(),
+    postcode: clearableText(), accessNotes: clearableText(), isPrimary: z.boolean().optional() }),
   handler: async ({ addressId, isPrimary, ...rest }) => {
     const a = await db.address.findUnique({ where: { id: addressId } });
     if (!a) throw new ActionError("Address not found");
@@ -374,10 +377,19 @@ defineAction({
   category: "Customers", roles: [...ADMIN], requiresConfirm: true,
   input: z.object({ addressId: z.string() }),
   handler: async ({ addressId }) => {
+    const a = await db.address.findUnique({ where: { id: addressId } });
+    if (!a) throw new ActionError("That address no longer exists.");
     const used = await db.booking.count({ where: { addressId } }) + await db.job.count({ where: { addressId } });
-    if (used > 0) throw new ActionError(`This address is used by ${used} booking(s)/job(s) and cannot be removed`);
+    if (used > 0) throw new ActionError(`${a.label} (${a.line1}) is used by ${used} booking(s)/job(s) and cannot be removed. Edit it instead, so the past work still says where it happened.`);
     await db.address.delete({ where: { id: addressId } });
-    return { deleted: addressId };
+    // Removing the primary one would otherwise leave the customer with
+    // addresses and none of them primary. Hand it to the next oldest.
+    let promoted: string | null = null;
+    if (a.isPrimary) {
+      const next = await db.address.findFirst({ where: { customerId: a.customerId }, orderBy: { id: "asc" } });
+      if (next) { await db.address.update({ where: { id: next.id }, data: { isPrimary: true } }); promoted = next.label; }
+    }
+    return { deleted: a.label, ...(promoted ? { promotedToPrimary: promoted } : {}) };
   },
 });
 

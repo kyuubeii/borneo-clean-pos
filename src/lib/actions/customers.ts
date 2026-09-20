@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { db } from "../db";
+import { clearableText } from "../schema";
 import { defineAction, ActionError } from "../registry";
 
 const ALL = ["OWNER", "ADMIN"] as const;
@@ -66,11 +67,19 @@ defineAction({
 
 defineAction({
   name: "customers.update",
-  description: "Update a customer's contact details or notes.",
+  description: "Update a customer's contact details or notes, or deactivate them. Send an empty string for a field to clear it; leave a field out to keep it as it is.",
   category: "Customers", roles: [...ALL],
-  input: z.object({ customerId: z.string(), name: z.string().optional(), email: z.string().optional(),
-    phone: z.string().optional(), company: z.string().optional(), notes: z.string().optional(), active: z.boolean().optional() }),
-  handler: async ({ customerId, ...data }) => db.customer.update({ where: { id: customerId }, data }),
+  // Everything but the name is clearable: the edit form has to be able to take a
+  // wrong phone number off a record, and an omitted key cannot express that.
+  // Name is the one thing a customer must keep, so it is only ever replaced.
+  input: z.object({ customerId: z.string(), name: z.string().min(1).optional(),
+    email: clearableText(), phone: clearableText(), company: clearableText(),
+    notes: clearableText(), active: z.boolean().optional() }),
+  handler: async ({ customerId, ...data }) => {
+    const c = await db.customer.findUnique({ where: { id: customerId } });
+    if (!c) throw new ActionError("That customer no longer exists.");
+    return db.customer.update({ where: { id: customerId }, data, include: { addresses: true } });
+  },
 });
 
 defineAction({
@@ -82,7 +91,10 @@ defineAction({
     postcode: z.string().optional(), accessNotes: z.string().optional(), isPrimary: z.boolean().default(false) }),
   handler: async ({ customerId, ...a }) => {
     if (a.isPrimary) await db.address.updateMany({ where: { customerId }, data: { isPrimary: false } });
-    return db.address.create({ data: { customerId, ...a } });
+    // The first address is the primary one whether or not anyone said so. A
+    // customer with addresses and no primary is a state no screen can show.
+    const first = (await db.address.count({ where: { customerId } })) === 0;
+    return db.address.create({ data: { customerId, ...a, isPrimary: a.isPrimary || first } });
   },
 });
 
