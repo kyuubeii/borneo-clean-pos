@@ -16,6 +16,8 @@ defineAction({
     ] } : {};
     const rows = await db.customer.findMany({ where, take: limit, orderBy: { name: "asc" }, include: { addresses: true } });
     return rows.map((c) => ({ id: c.id, name: c.name, email: c.email, phone: c.phone, company: c.company, notes: c.notes,
+      // The customers screen shows and toggles this, so it has to come back.
+      active: c.active,
       addresses: c.addresses.map((a) => ({ id: a.id, label: a.label, line1: a.line1, city: a.city })) }));
   },
 });

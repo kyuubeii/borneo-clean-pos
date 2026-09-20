@@ -39,6 +39,47 @@ defineAction({
 /* --------------------------------- Jobs ----------------------------------- */
 
 defineAction({
+  name: "bookings.delete",
+  description: "Permanently delete a booking and its line items. Refuses when a job has already been worked or invoiced -- cancel the booking instead, which keeps the record. Use only to remove a booking taken in error.",
+  category: "Bookings", roles: [...ADMIN], requiresConfirm: true,
+  input: z.object({ bookingId: z.string() }),
+  handler: async ({ bookingId }) => {
+    const b = await db.booking.findUnique({
+      where: { id: bookingId },
+      include: { customer: true, job: { include: { invoice: true, timeEntries: true, assignments: true } }, children: true },
+    });
+    if (!b) throw new ActionError("That booking no longer exists.");
+
+    // Job.bookingId is an optional relation with no onDelete rule, so Prisma
+    // would quietly set it to null and leave the job stranded with no booking.
+    // Anything with work or money attached has to be kept.
+    const job = b.job;
+    if (job) {
+      if (job.invoice) {
+        throw new ActionError(`Booking ${b.ref} has already been invoiced (${job.invoice.ref}). Cancel the booking instead so the invoice still makes sense.`);
+      }
+      if (job.timeEntries.length > 0) {
+        throw new ActionError(`A cleaner has already logged time against booking ${b.ref}. Cancel it instead so the hours are kept.`);
+      }
+      if (job.status !== "SCHEDULED" && job.status !== "CANCELLED") {
+        throw new ActionError(`The job for booking ${b.ref} is ${job.status.toLowerCase().replace("_", " ")}. Cancel the booking instead of deleting it.`);
+      }
+    }
+    if (b.children.length > 0) {
+      throw new ActionError(`Booking ${b.ref} starts a recurring series of ${b.children.length + 1}. Cancel the series instead, which keeps the history.`);
+    }
+
+    // BookingItem cascades. The job does not, so it goes first and explicitly.
+    const ref = b.ref, customer = b.customer.name;
+    await db.$transaction(async (tx) => {
+      if (job) await tx.job.delete({ where: { id: job.id } });
+      await tx.booking.delete({ where: { id: bookingId } });
+    });
+    return { deleted: `Booking ${ref}`, customer, jobRemoved: job?.ref ?? null };
+  },
+});
+
+defineAction({
   name: "jobs.addChecklistItem",
   description: "Add a single item to a job's checklist without replacing the existing ones.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
@@ -128,7 +169,7 @@ defineAction({
     const job = await db.job.findUnique({ where: { id: jobId }, include: { customer: true, booking: true } });
     if (!job) throw new ActionError("Job not found");
     const to = await db.customer.findUnique({ where: { id: customerId }, include: { addresses: true } });
-    if (!to) throw new ActionError("That customer does not exist. Look them up first.");
+    if (!to) throw new ActionError("That customer no longer exists.");
     if (job.customerId === customerId) throw new ActionError(`${job.ref} is already filed under ${to.name}.`);
 
     // The old address belongs to the old customer, so it cannot come along.
@@ -176,7 +217,7 @@ defineAction({
   handler: async ({ quoteId, items, validUntil, ...rest }) => {
     const q = await db.quote.findUnique({ where: { id: quoteId } });
     if (!q) throw new ActionError("Quote not found");
-    if (q.convertedBookingId) throw new ActionError("This quote has already been converted to a booking and cannot be edited");
+    if (q.convertedBookingId) throw new ActionError("This quote has already been turned into a booking, so it can no longer be edited. Edit the booking instead.");
     if (items) {
       await db.quoteItem.deleteMany({ where: { quoteId } });
       await db.quoteItem.createMany({ data: items.map((i) => ({ ...i, quoteId })) });
@@ -195,7 +236,7 @@ defineAction({
   handler: async ({ quoteId }) => {
     const q = await db.quote.findUnique({ where: { id: quoteId } });
     if (!q) throw new ActionError("Quote not found");
-    if (q.convertedBookingId) throw new ActionError("This quote has been converted to a booking; cancel the booking instead");
+    if (q.convertedBookingId) throw new ActionError("This quote has already been turned into a booking. Cancel that booking instead.");
     await db.quote.delete({ where: { id: quoteId } });
     return { deleted: q.ref };
   },
@@ -216,7 +257,7 @@ defineAction({
   handler: async ({ invoiceId, items, dueAt, ...rest }) => {
     const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { payments: true } });
     if (!inv) throw new ActionError("Invoice not found");
-    if (items && inv.payments.length) throw new ActionError(`Invoice ${inv.ref} already has payments recorded; void it and raise a new one instead`);
+    if (items && inv.payments.length) throw new ActionError(`Invoice ${inv.ref} already has payments against it, so its line items are fixed. Void it and raise a new one instead.`);
     if (items) {
       await db.invoiceItem.deleteMany({ where: { invoiceId } });
       await db.invoiceItem.createMany({ data: items.map((i) => ({ ...i, invoiceId })) });
@@ -235,7 +276,7 @@ defineAction({
   handler: async ({ invoiceId }) => {
     const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { payments: true } });
     if (!inv) throw new ActionError("Invoice not found");
-    if (inv.payments.length) throw new ActionError(`Invoice ${inv.ref} has payments recorded and cannot be deleted; void it instead`);
+    if (inv.payments.length) throw new ActionError(`Invoice ${inv.ref} has payments against it and cannot be deleted. Void it instead, which keeps the record and the payments.`);
     await db.job.updateMany({ where: { invoiceId }, data: { invoiceId: null } });
     await db.invoice.delete({ where: { id: invoiceId } });
     return { deleted: inv.ref };
@@ -344,7 +385,7 @@ defineAction({
       include: { _count: { select: { bookings: true, jobs: true, invoices: true, payments: true } } } });
     if (!c) throw new ActionError("Customer not found");
     const n = c._count.bookings + c._count.jobs + c._count.invoices + c._count.payments;
-    if (n > 0) throw new ActionError(`${c.name} has ${n} linked record(s). Deactivate instead of deleting to preserve history.`);
+    if (n > 0) throw new ActionError(`${c.name} has ${n} linked record(s) \u2014 bookings, jobs or invoices. Deactivate the customer instead, which keeps all of it.`);
     await db.customer.delete({ where: { id: customerId } });
     return { deleted: c.name };
   },
@@ -359,7 +400,7 @@ defineAction({
   input: z.object({ serviceId: z.string() }),
   handler: async ({ serviceId }) => {
     const used = await db.bookingItem.count({ where: { serviceId } }) + await db.quoteItem.count({ where: { serviceId } });
-    if (used > 0) throw new ActionError(`This service is used on ${used} record(s). Set active:false with services.update instead.`);
+    if (used > 0) throw new ActionError(`This service is used on ${used} record(s). Deactivate it instead \u2014 it stops appearing on new bookings and the existing ones keep their prices.`);
     const s = await db.service.delete({ where: { id: serviceId } });
     return { deleted: s.name };
   },
@@ -372,7 +413,7 @@ defineAction({
   input: z.object({ staffId: z.string() }),
   handler: async ({ staffId }) => {
     const used = await db.jobAssignment.count({ where: { staffId } });
-    if (used > 0) throw new ActionError(`This cleaner is on ${used} job(s). Set active:false with staff.update instead.`);
+    if (used > 0) throw new ActionError(`This cleaner is on ${used} job(s). Deactivate them instead \u2014 they stop appearing on new jobs and their work history is kept.`);
     const s = await db.staff.delete({ where: { id: staffId } });
     return { deleted: s.name };
   },

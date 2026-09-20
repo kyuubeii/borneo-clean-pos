@@ -73,6 +73,101 @@ export function Empty({ text }: { text: string }) {
   </div>;
 }
 
+/* ---------------------------- Destructive confirm -------------------------- */
+/**
+ * The one way this app deletes things.
+ *
+ * Worth knowing: the registry's `requiresConfirm` flag does NOT guard this path.
+ * runAction only honours it when the call comes from the assistant, so for a
+ * button the confirmation is entirely the UI's job. That is why every delete
+ * goes through here rather than a bare window.confirm.
+ *
+ * `confirmText` arms the button only once it has been typed back, for deletions
+ * that take real records with them. Omit it for small, obvious ones.
+ * `consequences` is a slot because what is lost differs per record, and vague
+ * warnings train people to click through.
+ */
+export function ConfirmDelete({
+  open, onClose, onDone, title, action, input, confirmText, confirmLabel, verb = "Delete",
+  children, alternative,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onDone?: () => void;
+  title: string;
+  action: string;
+  input: unknown;
+  /** Typed back to arm the button; omit when the deletion is minor. */
+  confirmText?: string;
+  /** What the field asks for, e.g. "the email address". */
+  confirmLabel?: string;
+  verb?: string;
+  /** What this removes, and what it keeps. */
+  children: ReactNode;
+  /** The non-destructive option, when one exists. */
+  alternative?: ReactNode;
+}) {
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState(false);
+  const armed = !confirmText || typed.trim().toLowerCase() === confirmText.trim().toLowerCase();
+
+  function close() { setTyped(""); setBusy(false); onClose(); }
+
+  async function go() {
+    setBusy(true);
+    try {
+      const r = await callAction(action, input);
+      toast(typeof r?.deleted === "string" ? `${r.deleted} deleted` : `${verb}d`);
+      onDone?.();
+      close();
+    } catch (e: any) {
+      toast(humanError(e.message), "err");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={open} onClose={close} title={title}>
+      <div className="space-y-3">
+        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-[11px] leading-relaxed text-rose-700">
+          {children}
+        </div>
+        {alternative && <p className="text-[11px] leading-relaxed text-ink-500">{alternative}</p>}
+        {confirmText && (
+          <Field label={`Type ${confirmLabel ?? "the name"} to confirm`} hint={confirmText}>
+            <input className="input" value={typed} onChange={(e) => setTyped(e.target.value)}
+              placeholder={confirmText} autoComplete="off" />
+          </Field>
+        )}
+        <div className="flex justify-end gap-2">
+          <button onClick={close} className="btn-outline">Cancel</button>
+          <button onClick={go} disabled={!armed || busy}
+            className="btn-sm rounded-lg bg-rose-600 px-3 py-2 font-medium text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:bg-ink-200">
+            {busy ? `${verb.replace(/e$/, "")}ing\u2026` : verb}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Registry errors are written for the AI that also calls these actions, so they
+ * name actions and fields ("Set active:false with staff.update"). Shown to an
+ * owner running a cleaning business, that is noise. Translate the ones a person
+ * can actually hit from a button.
+ */
+export function humanError(msg: string): string {
+  if (!msg) return "Something went wrong.";
+  return msg
+    .replace(/Set active:false with staff\.update instead\.?/i, "Deactivate them instead \u2014 that keeps their history.")
+    .replace(/\buse \w+\.\w+\b/gi, "use the relevant screen")
+    .replace(/Look the record up first and use the exact id returned; omit optional IDs you do not have\.?/i,
+      "Something it refers to no longer exists. Reload the page and try again.")
+    .replace(/That record does not exist\. Check the id, or search for it first\.?/i,
+      "That record no longer exists. It may already have been deleted.");
+}
+
 /* ------------------------------ Action client ----------------------------- */
 /**
  * Calls one action through the same registry the assistant uses.
