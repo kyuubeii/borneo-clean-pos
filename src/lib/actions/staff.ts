@@ -31,7 +31,10 @@ defineAction({
   category: "Staff", roles: ["OWNER", "ADMIN"],
   input: z.object({ staffId: z.string(), name: z.string().optional(), phone: z.string().optional(),
     email: z.string().optional(), payType: z.enum(["HOURLY", "PER_JOB", "PERCENT"]).optional(),
-    payRate: z.number().int().optional(), active: z.boolean().optional(), notes: z.string().optional() }),
+    payRate: z.number().int().optional(), active: z.boolean().optional(), notes: z.string().optional(),
+    // Zod strips unknown keys rather than rejecting them, so without this the
+    // edit form's colour change was accepted, reported as saved, and dropped.
+    colour: z.string().optional().describe("Hex colour used on the calendar") }),
   handler: async ({ staffId, ...data }) => db.staff.update({ where: { id: staffId }, data }),
 });
 

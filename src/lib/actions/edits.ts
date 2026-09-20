@@ -64,6 +64,12 @@ defineAction({
       if (job.status !== "SCHEDULED" && job.status !== "CANCELLED") {
         throw new ActionError(`The job for booking ${b.ref} is ${job.status.toLowerCase().replace("_", " ")}. Cancel the booking instead of deleting it.`);
       }
+      // Expense.jobId is optional with no onDelete rule either, so deleting the
+      // job would leave the spend recorded but attributable to nothing.
+      const spend = await db.expense.count({ where: { jobId: job.id } });
+      if (spend > 0) {
+        throw new ActionError(`${spend} expense(s) are logged against booking ${b.ref}. Cancel it instead so the spending still has a job to sit against.`);
+      }
     }
     if (b.children.length > 0) {
       throw new ActionError(`Booking ${b.ref} starts a recurring series of ${b.children.length + 1}. Cancel the series instead, which keeps the history.`);

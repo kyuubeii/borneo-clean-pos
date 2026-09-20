@@ -29,6 +29,11 @@ Every screen now offers the safe option first:
 | A booking that happened | **Cancel** | The record and the reason |
 | Money returned to a customer | **Refund** | Both entries, so the trail is honest |
 
+Deactivating now genuinely removes someone from the new-booking and new-quote
+dropdowns — `customers.search` filters them out by default, matching how
+`staff.list` and `services.list` already behaved. The Customers screen itself
+still lists them, so you can find and reactivate them.
+
 Delete is reserved for records created in error, and the registry refuses it once
 there is any history attached. That refusal is not a bug — it is the thing
 keeping your reports correct.
@@ -84,7 +89,10 @@ Please try these, in this order — each one takes seconds:
 2. **Staff → that same cleaner → Deactivate.** Should grey out, badge as
    Inactive, and keep every job.
 3. **Staff → a brand-new cleaner with no jobs → Delete.** Should work.
-4. **Staff → Edit.** Change a pay rate; reopen to confirm it stuck.
+4. **Staff → Edit.** Change a pay rate **and the calendar colour**; reopen to
+   confirm both stuck, and check the colour on the calendar. *(`staff.update`
+   did not accept `colour` at first — Zod strips unknown keys silently, so the
+   change was reported as saved and thrown away. Fixed, but worth confirming.)*
 5. **Bookings → a past, invoiced booking → Delete.** Should refuse and point at
    Cancel.
 6. **Invoices → an unpaid one → Void.** Should stop counting in Outstanding.

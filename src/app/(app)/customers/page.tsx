@@ -16,7 +16,7 @@ export default function Customers() {
   const canEdit = useCan(ADMIN_UP);
   // customers.delete is OWNER-only in the registry; gate the button the same way.
   const canDelete = useCan(OWNER_ONLY);
-  const { data, loading, refresh } = useAction<any[]>("customers.search", { query: q || undefined, limit: 50 });
+  const { data, loading, refresh } = useAction<any[]>("customers.search", { query: q || undefined, limit: 50, includeInactive: true });
 
   async function setActive(c: any, active: boolean) {
     setBusyId(c.id);

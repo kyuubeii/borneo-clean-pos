@@ -160,7 +160,6 @@ export function ConfirmDelete({
 export function humanError(msg: string): string {
   if (!msg) return "Something went wrong.";
   return msg
-    .replace(/Set active:false with staff\.update instead\.?/i, "Deactivate them instead \u2014 that keeps their history.")
     .replace(/\buse \w+\.\w+\b/gi, "use the relevant screen")
     .replace(/Look the record up first and use the exact id returned; omit optional IDs you do not have\.?/i,
       "Something it refers to no longer exists. Reload the page and try again.")

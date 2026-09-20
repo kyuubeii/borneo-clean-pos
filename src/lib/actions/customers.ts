@@ -8,12 +8,18 @@ defineAction({
   name: "customers.search",
   description: "Search customers by name, email, phone or company. Returns matching customer profiles with their addresses. Use this first whenever a request names a customer.",
   category: "Customers", roles: ["OWNER", "ADMIN"], readOnly: true,
-  input: z.object({ query: z.string().optional().describe("Free text to match against name, email, phone or company"), limit: z.number().int().min(1).max(50).default(20) }),
-  handler: async ({ query, limit }) => {
-    const where = query ? { OR: [
+  input: z.object({ query: z.string().optional().describe("Free text to match against name, email, phone or company"),
+    limit: z.number().int().min(1).max(50).default(20),
+    includeInactive: z.boolean().default(false).describe("Deactivated customers are left out unless this is true") }),
+  handler: async ({ query, limit, includeInactive }) => {
+    // Deactivating a customer is supposed to keep them off new bookings, and the
+    // booking and quote forms both fill their dropdown from here. Matches how
+    // staff.list and services.list already behave.
+    const active = includeInactive ? {} : { active: true };
+    const where = query ? { ...active, OR: [
       { name: { contains: query } }, { email: { contains: query } },
       { phone: { contains: query } }, { company: { contains: query } },
-    ] } : {};
+    ] } : active;
     const rows = await db.customer.findMany({ where, take: limit, orderBy: { name: "asc" }, include: { addresses: true } });
     return rows.map((c) => ({ id: c.id, name: c.name, email: c.email, phone: c.phone, company: c.company, notes: c.notes,
       // The customers screen shows and toggles this, so it has to come back.
