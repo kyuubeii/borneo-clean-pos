@@ -73,7 +73,12 @@ defineAction({
   handler: async ({ quoteId, startAt }) => {
     const q = await db.quote.findUnique({ where: { id: quoteId }, include: { items: { include: { service: true } }, customer: { include: { addresses: true } } } });
     if (!q) throw new ActionError("Quote not found");
-    if (q.convertedBookingId) throw new ActionError("This quote has already been converted");
+    // A deleted booking leaves this column pointing at nothing, since it is not
+    // a foreign key. Only a booking that still exists should block a re-convert.
+    if (q.convertedBookingId) {
+      const prior = await db.booking.findUnique({ where: { id: q.convertedBookingId }, select: { ref: true } });
+      if (prior) throw new ActionError(`This quote has already been converted into booking ${prior.ref}.`);
+    }
     const t = totals(q.items, q.discountCents, q.taxRateBp);
     const when = new Date(startAt);
     const duration = q.items.reduce((a, i) => a + (i.service?.durationMin ?? 120) * i.qty, 0) || 120;

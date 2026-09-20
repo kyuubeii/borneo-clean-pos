@@ -15,8 +15,8 @@ export default function StaffDashboard() {
   async function toggle(jobId: string, checkedIn: boolean) {
     if (!me.staffId) return toast("No cleaner profile linked to your account", "err");
     try {
-      await callAction(checkedIn ? "staff.checkOut" : "staff.checkIn", { jobId, staffId: me.staffId });
-      toast(checkedIn ? "Checked out" : "Checked in"); refresh();
+      const r = await callAction(checkedIn ? "staff.checkOut" : "staff.checkIn", { jobId, staffId: me.staffId });
+      toast(r?.message ?? (checkedIn ? "Checked out" : "Checked in")); refresh();
     } catch (e: any) { toast(e.message, "err"); }
   }
 

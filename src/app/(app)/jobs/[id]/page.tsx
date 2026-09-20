@@ -22,12 +22,15 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
   const [notes, setNotes] = useState<string | null>(null);
   const [price, setPrice] = useState(false);
   const [move, setMove] = useState(false);
+  const [materials, setMaterials] = useState(false);
   const isStaff = useIsStaff();
   const [busy, setBusy] = useState(false);
 
   async function run(fn: () => Promise<any>, msg: string) {
     setBusy(true);
-    try { await fn(); toast(msg); refresh(); costing.refresh(); }
+    // An action that returns its own message knows something the caller does
+    // not -- a check-out that turned out to be a mis-tap, for instance.
+    try { const r = await fn(); toast(r?.message ?? msg); refresh(); costing.refresh(); }
     catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
   }
 
@@ -145,10 +148,28 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
 
           {costing.data && (
             <div className="card card-pad">
-              <p className="section-title mb-3">{t("job.costing")}</p>
+              <div className="mb-3 flex items-center justify-between">
+                <p className="section-title">{t("job.costing")}</p>
+                {!isStaff && <button onClick={() => setMaterials(true)} className="btn-ghost btn-sm">Edit materials</button>}
+              </div>
               <dl className="space-y-1.5 text-sm">
                 <CostRow k={t("job.revenue")} v={costing.data.revenueCents} />
                 <CostRow k={t("job.labour")} v={-costing.data.labourCents} />
+                {/* Labour is the one figure nobody can check by eye, so the
+                    hours and rate behind it are spelled out underneath. */}
+                {costing.data.labourBreakdown?.length > 0 && (
+                  <div className="space-y-0.5 pl-3">
+                    {costing.data.labourBreakdown.map((b: any) => (
+                      <div key={b.staff} className="flex items-center justify-between text-[11px] text-ink-400">
+                        <dt>
+                          {b.staff} · {b.payType === "HOURLY" ? `${minsToLabel(b.minutes)}${b.estimated ? " (scheduled)" : " tracked"}`
+                            : b.payType === "PER_JOB" ? "per job" : "% of revenue"}
+                        </dt>
+                        <dd><Money cents={-b.costCents} /></dd>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <CostRow k={t("job.material")} v={-costing.data.materialCents} />
                 <CostRow k={t("job.otherExpenses")} v={-costing.data.otherExpenseCents} />
                 <div className="flex items-center justify-between border-t border-ink-100 pt-2">
@@ -158,6 +179,19 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
                 </div>
                 <p className="text-right text-xs text-ink-400">{costing.data.marginPct}% {t("dash.margin")}</p>
               </dl>
+              {costing.data.labourEstimated && (
+                <p className="mt-2 rounded-lg bg-ink-50 p-2 text-[11px] leading-relaxed text-ink-500">
+                  No usable check-in time was logged, so labour is estimated from the scheduled
+                  duration. Check cleaners in and out on the job to cost it on real hours.
+                </p>
+              )}
+              {costing.data.staffWithoutRate?.length > 0 && (
+                <p className="mt-2 rounded-lg bg-amber-50 p-2 text-[11px] leading-relaxed text-amber-800">
+                  {costing.data.staffWithoutRate.join(", ")} {costing.data.staffWithoutRate.length > 1 ? "have" : "has"} no
+                  pay rate set, so they add nothing to labour. Set it on
+                  the <Link href="/staff" className="underline">staff record</Link>.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -168,6 +202,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       <NotesModal value={notes} onClose={() => setNotes(null)} job={j} onDone={reload} />
       <PriceModal open={price} onClose={() => setPrice(false)} job={j} onDone={reload} />
       <MoveCustomerModal open={move} onClose={() => setMove(false)} job={j} onDone={reload} />
+      <MaterialsModal open={materials} onClose={() => setMaterials(false)} job={j} onDone={reload} />
     </div>
   );
 }
@@ -185,6 +220,16 @@ function Photos({ job, onDone }: any) {
   const [kind, setKind] = useState<"BEFORE" | "AFTER" | "ATTACHMENT">("BEFORE");
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const isStaff = useIsStaff();
+  // A URL that will not load stays broken forever, so the tile says so and
+  // offers a way out rather than showing the browser's broken-image glyph.
+  const [broken, setBroken] = useState<Record<string, boolean>>({});
+
+  async function remove(p: any) {
+    if (!confirm(`Remove this ${p.kind.toLowerCase()} photo from ${job.ref}?`)) return;
+    try { await callAction("jobs.deletePhoto", { photoId: p.id }); toast("Photo removed"); onDone(); }
+    catch (e: any) { toast(e.message, "err"); }
+  }
 
   async function upload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -216,12 +261,37 @@ function Photos({ job, onDone }: any) {
       <div className="p-4">
         {!job.photos.length ? <p className="py-4 text-center text-xs text-ink-400">No photos yet</p> : (
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-            {job.photos.map((p: any) => (
-              <a key={p.id} href={p.url} target="_blank" rel="noreferrer" className="group relative aspect-square overflow-hidden rounded-lg bg-ink-100">
-                <img src={p.url} alt={p.kind} className="h-full w-full object-cover transition group-hover:scale-105" />
-                <span className="absolute left-1 top-1 badge bg-ink-900/70 text-white">{p.kind}</span>
-              </a>
-            ))}
+            {job.photos.map((p: any) => {
+              const isPdf = /\.pdf($|\?)/i.test(p.url);
+              const dead = broken[p.id];
+              return (
+                <div key={p.id} className="group relative aspect-square overflow-hidden rounded-lg bg-ink-100">
+                  <a href={p.url} target="_blank" rel="noreferrer" className="block h-full w-full">
+                    {dead ? (
+                      <span className="flex h-full w-full flex-col items-center justify-center gap-1 p-2 text-center">
+                        <span className="text-lg">⚠️</span>
+                        <span className="text-[10px] leading-tight text-ink-500">Image will not load</span>
+                      </span>
+                    ) : isPdf ? (
+                      <span className="flex h-full w-full flex-col items-center justify-center gap-1 text-ink-500">
+                        <span className="text-lg">📄</span><span className="text-[10px]">PDF</span>
+                      </span>
+                    ) : (
+                      <img src={p.url} alt={p.caption || p.kind} loading="lazy"
+                        onError={() => setBroken((b) => ({ ...b, [p.id]: true }))}
+                        className="h-full w-full object-cover transition group-hover:scale-105" />
+                    )}
+                  </a>
+                  <span className="absolute left-1 top-1 badge bg-ink-900/70 text-white">{p.kind}</span>
+                  {!isStaff && (
+                    <button onClick={() => remove(p)} title="Remove this photo"
+                      className="absolute right-1 top-1 rounded-md bg-ink-900/70 p-1 text-white opacity-0 transition hover:bg-rose-600 focus:opacity-100 group-hover:opacity-100">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -335,6 +405,37 @@ function PriceModal({ open, onClose, job, onDone }: any) {
         <p className="text-[11px] text-ink-400">
           Currently <Money cents={job.revenueCents} />. Money already received stays received — the invoice simply
           goes back to part-paid if the new amount is higher.
+        </p>
+        <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
+          <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : t("common.save")}</button></div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Materials bought for the job -- cleaning supplies, consumables, parts. */
+function MaterialsModal({ open, onClose, job, onDone }: any) {
+  const t = useT();
+  const [amount, setAmount] = useState((job.materialCostCents / 100).toFixed(2));
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) setAmount((job.materialCostCents / 100).toFixed(2)); }, [open, job.materialCostCents]);
+  async function go() {
+    const cents = toCents(amount);
+    if (cents < 0) return toast("Materials cannot be negative", "err");
+    setBusy(true);
+    try { await callAction("jobs.update", { jobId: job.id, materialCostCents: cents }); toast("Materials updated"); onDone(); onClose(); }
+    catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+  }
+  return (
+    <Modal open={open} onClose={onClose} title={`Materials · ${job.ref}`}>
+      <div className="space-y-3">
+        <Field label="Materials cost (RM)" hint="Supplies and consumables used on this job. Counts against the job's profit.">
+          <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        </Field>
+        <p className="text-[11px] text-ink-400">
+          Money paid to a supplier and reimbursed to a cleaner belongs in Expenses against
+          this job instead — that keeps the reimbursement trail. This field is for stock
+          already owned that the job used up.
         </p>
         <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
           <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : t("common.save")}</button></div>

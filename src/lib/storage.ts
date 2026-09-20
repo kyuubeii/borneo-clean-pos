@@ -22,3 +22,25 @@ export const storage =
     : null;
 
 export const storageConfigured = () => storage !== null;
+
+/**
+ * True for a URL this app actually produced -- a public object in our bucket.
+ *
+ * Photos are written by `jobs.addPhoto`, which takes a URL string, so without
+ * this check anything at all can be attached: a link to a site that blocks
+ * hotlinking, a plain http:// address the browser refuses to load on an https
+ * page, or a typo. All three show up as a broken thumbnail that looks like a
+ * corrupt upload, and none of them can be repaired after the fact.
+ */
+export function isUploadedFileUrl(candidate: string): boolean {
+  let u: URL;
+  try { u = new URL(candidate); } catch { return false; }
+  if (u.protocol !== "https:") return false;
+  // With storage unconfigured (local dev against a bare database) there is no
+  // bucket to compare against, so accept any https URL rather than block work.
+  if (!url) return true;
+  try {
+    const base = new URL(url);
+    return u.host === base.host && u.pathname.startsWith(`/storage/v1/object/public/${BUCKET}/`);
+  } catch { return true; }
+}

@@ -102,6 +102,15 @@ defineAction({
   handler: async ({ jobId, staffId, note }) => {
     const open = await db.timeEntry.findFirst({ where: { jobId, staffId, endAt: null }, orderBy: { startAt: "desc" } });
     if (!open) throw new ActionError("No open check-in found for this cleaner on this job");
+    // A check-out seconds after the check-in is a mis-tap, not work. Storing it
+    // would cost the job a stray cent or two of labour and, worse, look like
+    // real tracked time -- so the costing would trust it over the scheduled
+    // duration. The entry is dropped instead, leaving nothing to unpick.
+    const minutes = (Date.now() - open.startAt.getTime()) / 60000;
+    if (minutes < 1) {
+      await db.timeEntry.delete({ where: { id: open.id } });
+      return { removed: true, message: "Check-in cancelled — under a minute, so no time was recorded." };
+    }
     return db.timeEntry.update({ where: { id: open.id }, data: { endAt: new Date(), note } });
   },
 });

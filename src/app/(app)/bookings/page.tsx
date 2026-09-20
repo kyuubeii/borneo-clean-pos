@@ -1,5 +1,5 @@
 "use client";
-import { useState, Suspense } from "react";
+import { useState, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useT } from "@/components/I18nProvider";
@@ -9,6 +9,35 @@ import { useCan, ADMIN_UP } from "@/components/UserProvider";
 import BookingForm from "@/components/BookingForm";
 import { fmtDateTime, minsToLabel, isoDate } from "@/lib/dates";
 
+type SortKey = "ref" | "customer" | "date" | "total" | "status";
+
+/** A booking's value is the sum of its service lines; there is no stored total. */
+const total = (b: any) => b.items.reduce((a: number, i: any) => a + i.qty * i.priceCents, 0);
+
+/**
+ * Defined here rather than inside the page: a component declared in the body of
+ * another component is a new type on every render, so React throws the old
+ * header cells away and mounts new ones each time the sort changes -- which
+ * loses the button the pointer is currently over, mid-click.
+ */
+function SortTh({ k, label, align = "", sort, dir, onSort }: {
+  k: SortKey; label: string; align?: string;
+  sort: SortKey; dir: 1 | -1; onSort: (k: SortKey) => void;
+}) {
+  const on = sort === k;
+  return (
+    <th className={`th ${align}`}>
+      <button type="button" onClick={() => onSort(k)} aria-sort={on ? (dir === 1 ? "ascending" : "descending") : "none"}
+        className={`inline-flex items-center gap-1 transition hover:text-ink-800 ${on ? "text-ink-800" : ""}`}>
+        {label}
+        <span className={`text-[9px] leading-none ${on ? "opacity-100" : "opacity-25"}`}>
+          {on && dir === -1 ? "\u25bc" : "\u25b2"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 function BookingsInner() {
   const t = useT();
   const sp = useSearchParams();
@@ -16,6 +45,8 @@ function BookingsInner() {
   const [status, setStatus] = useState("");
   const [scope, setScope] = useState<"upcoming" | "all">("all");
   const [deleting, setDeleting] = useState<any>(null);
+  const [sort, setSort] = useState<SortKey>("date");
+  const [dir, setDir] = useState<1 | -1>(1);
   const manage = useCan(ADMIN_UP);
 
   const { data, loading, refresh } = useAction<any[]>("bookings.list", {
@@ -23,6 +54,35 @@ function BookingsInner() {
     ...(scope === "upcoming" ? { from: isoDate(new Date()) } : {}),
     limit: 100,
   });
+
+  /**
+   * Sorting is done here rather than in the query: the list is one page of at
+   * most 100 rows, so re-ordering what is already on screen is instant and
+   * cannot disagree with what the server chose to send.
+   */
+  const rows = useMemo(() => {
+    if (!data) return data;
+    const v = (b: any) => {
+      switch (sort) {
+        case "ref": return b.ref;
+        case "customer": return (b.customer?.name ?? "").toLowerCase();
+        case "total": return total(b);
+        case "status": return b.status;
+        default: return new Date(b.startAt).getTime();
+      }
+    };
+    return [...data].sort((a, b) => {
+      const x = v(a), y = v(b);
+      return (x < y ? -1 : x > y ? 1 : 0) * dir;
+    });
+  }, [data, sort, dir]);
+
+  function sortBy(key: SortKey) {
+    // Same column toggles direction; a new column starts ascending.
+    if (key === sort) setDir(dir === 1 ? -1 : 1);
+    else { setSort(key); setDir(1); }
+  }
+  const sortProps = { sort, dir, onSort: sortBy };
 
   return (
     <div>
@@ -50,13 +110,18 @@ function BookingsInner() {
         : <div className="overflow-x-auto">
             <table className="w-full min-w-[720px]">
               <thead className="border-b border-ink-100 bg-ink-50/50">
-                <tr><th className="th">Ref</th><th className="th">{t("common.customer")}</th>
-                  <th className="th">{t("common.date")}</th><th className="th">Services</th>
-                  <th className="th text-right">{t("common.total")}</th><th className="th">{t("common.status")}</th>
-                  {manage && <th className="th w-px text-right">{t("common.actions")}</th>}</tr>
+                <tr>
+                  <SortTh k="ref" label="Ref" {...sortProps} />
+                  <SortTh k="customer" label={t("common.customer")} {...sortProps} />
+                  <SortTh k="date" label={t("common.date")} {...sortProps} />
+                  <th className="th">Services</th>
+                  <SortTh k="total" label={t("common.total")} align="text-right" {...sortProps} />
+                  <SortTh k="status" label={t("common.status")} {...sortProps} />
+                  {manage && <th className="th w-px text-right">{t("common.actions")}</th>}
+                </tr>
               </thead>
               <tbody className="divide-y divide-ink-50">
-                {data.map((b) => (
+                {rows!.map((b) => (
                   <tr key={b.id} className="row-link" onClick={() => location.assign(`/bookings/${b.id}`)}>
                     <td className="td whitespace-nowrap">
                       <Link href={`/bookings/${b.id}`} className="font-medium text-ink-900 hover:text-brand-600">{b.ref}</Link>
@@ -67,7 +132,7 @@ function BookingsInner() {
                     <td className="td whitespace-nowrap text-ink-600">{fmtDateTime(new Date(b.startAt))}
                       <span className="ml-1 text-[11px] text-ink-400">{minsToLabel(b.durationMin)}</span></td>
                     <td className="td text-ink-500">{b.items.map((i: any) => i.name).join(", ")}</td>
-                    <td className="td text-right font-medium"><Money cents={b.items.reduce((a: number, i: any) => a + i.qty * i.priceCents, 0)} /></td>
+                    <td className="td text-right font-medium"><Money cents={total(b)} /></td>
                     <td className="td"><Badge status={b.status} label={t(`bk.status.${b.status}`)} /></td>
                     {manage && (
                       // stopPropagation: the row itself navigates to the booking.

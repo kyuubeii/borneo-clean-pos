@@ -4,6 +4,7 @@ import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { startOfDay, endOfDay } from "../dates";
 import { notify } from "../notify";
+import { isUploadedFileUrl } from "../storage";
 
 const JOB_INCLUDE = {
   customer: true, address: true,
@@ -139,10 +140,24 @@ defineAction({
 
 defineAction({
   name: "jobs.addPhoto",
-  description: "Attach a before/after photo or file to a job. The URL must already be uploaded.",
+  description: "Attach a before/after photo or file to a job. The URL must be one returned by the upload endpoint -- this does not accept an arbitrary web address.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
-  input: z.object({ jobId: z.string(), url: z.string(), kind: z.enum(["BEFORE", "AFTER", "ATTACHMENT"]).default("BEFORE"), caption: z.string().optional() }),
-  handler: async (i) => db.photo.create({ data: i }),
+  input: z.object({
+    jobId: z.string(),
+    url: z.string().url("A photo URL must be a full https:// address returned by the uploader"),
+    kind: z.enum(["BEFORE", "AFTER", "ATTACHMENT"]).default("BEFORE"), caption: z.string().optional(),
+  }),
+  handler: async (i) => {
+    const job = await db.job.findUnique({ where: { id: i.jobId }, select: { id: true } });
+    if (!job) throw new ActionError("Job not found");
+    // Anything but a file this app uploaded renders as a broken image and can
+    // never be fixed, because the picture was never ours to serve. A plain
+    // http:// address is also blocked by the browser on an https page.
+    if (!isUploadedFileUrl(i.url)) {
+      throw new ActionError("Photos have to be uploaded through the Add button. A link to a picture somewhere else cannot be attached.");
+    }
+    return db.photo.create({ data: i });
+  },
 });
 
 defineAction({
@@ -157,16 +172,30 @@ defineAction({
     } });
     if (!j) throw new ActionError("Job not found");
     let labour = 0;
-    const breakdown: { staff: string; minutes: number; costCents: number }[] = [];
+    let anyEstimated = false;
+    const breakdown: { staff: string; minutes: number; costCents: number; payType: string; estimated: boolean; noRate: boolean }[] = [];
     for (const a of j.assignments) {
-      const mins = j.timeEntries.filter((t) => t.staffId === a.staffId)
-        .reduce((x, t) => x + (t.endAt ? (t.endAt.getTime() - t.startAt.getTime()) / 60000 : 0), 0)
-        || (j.status === "COMPLETED" ? j.durationMin : 0);
+      const tracked = j.timeEntries.filter((t) => t.staffId === a.staffId)
+        .reduce((x, t) => x + (t.endAt ? (t.endAt.getTime() - t.startAt.getTime()) / 60000 : 0), 0);
+      // A check-in closed seconds after it was opened is a mis-tap, not work.
+      // Anything under a minute is treated as untracked, so a completed job
+      // falls back to its scheduled duration instead of costing a stray cent.
+      const useTracked = tracked >= 1;
+      const estimated = !useTracked && j.status === "COMPLETED";
+      const mins = useTracked ? tracked : estimated ? j.durationMin : 0;
       const c = a.staff.payType === "HOURLY" ? Math.round((mins / 60) * a.staff.payRate)
         : a.staff.payType === "PER_JOB" ? a.staff.payRate
         : Math.round((j.revenueCents * a.staff.payRate) / 10000);
       labour += c;
-      breakdown.push({ staff: a.staff.name, minutes: Math.round(mins), costCents: c });
+      if (estimated && a.staff.payType === "HOURLY") anyEstimated = true;
+      breakdown.push({
+        staff: a.staff.name, minutes: Math.round(mins), costCents: c,
+        payType: a.staff.payType,
+        estimated: estimated && a.staff.payType === "HOURLY",
+        // A cleaner on a zero pay rate contributes nothing to labour, which
+        // looks like a costing fault but is an unset rate on the staff record.
+        noRate: a.staff.payRate === 0,
+      });
     }
     const other = j.expenses.reduce((a, e) => a + e.amountCents, 0);
     const cost = labour + j.materialCostCents + other;
@@ -177,6 +206,8 @@ defineAction({
       otherExpenseCents: other, totalCostCents: cost, profitCents: profit,
       marginPct: j.revenueCents > 0 ? +((profit / j.revenueCents) * 100).toFixed(1) : 0,
       labourBreakdown: breakdown,
+      labourEstimated: anyEstimated,
+      staffWithoutRate: breakdown.filter((b) => b.noRate).map((b) => b.staff),
     };
   },
 });

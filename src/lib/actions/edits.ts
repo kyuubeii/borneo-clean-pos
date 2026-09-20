@@ -79,6 +79,10 @@ defineAction({
     const ref = b.ref, customer = b.customer.name;
     await db.$transaction(async (tx) => {
       if (job) await tx.job.delete({ where: { id: job.id } });
+      // Quote.convertedBookingId is a plain column with no foreign key, so it
+      // would be left pointing at a booking that no longer exists -- which then
+      // blocks the quote from ever being deleted or converted again.
+      await tx.quote.updateMany({ where: { convertedBookingId: bookingId }, data: { convertedBookingId: null } });
       await tx.booking.delete({ where: { id: bookingId } });
     });
     return { deleted: `Booking ${ref}`, customer, jobRemoved: job?.ref ?? null };
@@ -242,7 +246,12 @@ defineAction({
   handler: async ({ quoteId }) => {
     const q = await db.quote.findUnique({ where: { id: quoteId } });
     if (!q) throw new ActionError("Quote not found");
-    if (q.convertedBookingId) throw new ActionError("This quote has already been turned into a booking. Cancel that booking instead.");
+    // The pointer is a plain column, not a foreign key, so it can outlive the
+    // booking it names. Only a booking that is still there should block this.
+    if (q.convertedBookingId) {
+      const booking = await db.booking.findUnique({ where: { id: q.convertedBookingId }, select: { ref: true } });
+      if (booking) throw new ActionError(`This quote has already been turned into booking ${booking.ref}. Cancel that booking instead.`);
+    }
     await db.quote.delete({ where: { id: quoteId } });
     return { deleted: q.ref };
   },
