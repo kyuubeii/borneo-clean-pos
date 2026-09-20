@@ -219,9 +219,7 @@ largest win, and it likely also collapses most of the 6x pooler overhead: the
 extra ~410 ms was roughly 4.5 × the 91 ms round trip, consistent with the pooler
 making several round trips per query — cheap once it is next to the database.
 
-**Verified live on 2026-09-20.** Once the GitHub repository was connected to the
-Vercel project, deploys completed normally (49s and 1m) — the earlier CLI deploys
-that hung in `UNKNOWN` were unrelated to these changes. Production now answers:
+**Verified live on 2026-09-20.** Production now answers:
 
 ```
 x-matched-path: /api/actions/[name]
@@ -238,6 +236,18 @@ with no database work):
 | | Before | After |
 |---|---|---|
 | Auth path, 5 samples | 0.66 – 1.55 s | **0.23 – 0.49 s** |
+
+### A note on deploying this project
+
+`vercel --prod` from the CLI hangs in `UNKNOWN` / `Building…` and never
+completes — three attempts here, plus four of the project's own CLI deploys from
+the day before, all stuck the same way. Deploying through the connected GitHub
+repository works first time, every time: the two pushes that shipped these
+changes built in 49s and 1m.
+
+**Push to `main`; do not deploy from the CLI.** If the CLI is ever the only
+option, the stuck deployments have to be removed with `vercel remove <url>`
+before a later one will build.
 
 Re-check the region after any change to the project's settings:
 
