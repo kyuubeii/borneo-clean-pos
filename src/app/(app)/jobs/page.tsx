@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Badge, Money, Empty } from "@/components/ui";
+import { LoadError, useAction, Badge, Money, Empty } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import { fmtDateTime, addDays, minsToLabel, isoDate } from "@/lib/dates";
 
@@ -18,12 +18,13 @@ export default function Jobs() {
   const [range, setRange] = useState("week");
   const [status, setStatus] = useState("");
   const r = RANGES.find((x) => x.key === range)!;
-  const { data, loading } = useAction<any[]>("jobs.list", {
+  const { data, loading, error, refresh } = useAction<any[]>("jobs.list", {
     from: r.from(), to: r.to(), ...(status ? { status } : {}), limit: 100,
   });
 
   return (
     <div>
+      <LoadError error={error} onRetry={refresh} />
       <PageHeader title={t("nav.jobs")} subtitle={`${data?.length ?? 0} ${t("common.shown")}`} />
 
       <div className="mb-3 flex flex-wrap gap-2">
@@ -43,6 +44,7 @@ export default function Jobs() {
 
       {/* Card list on mobile, table on desktop — cleaners work from phones. */}
       <div className="space-y-2 sm:hidden">
+        {loading ? <p className="text-sm text-ink-500">Loading jobs…</p> : !error && !data?.length ? <Empty text={t("common.empty")} /> : null}
         {(data ?? []).map((j) => (
           <Link key={j.id} href={`/jobs/${j.id}`} className="card card-pad block">
             <div className="flex items-start justify-between gap-2">

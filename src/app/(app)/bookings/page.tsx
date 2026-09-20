@@ -3,7 +3,7 @@ import { useState, useMemo, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Badge, Money, Empty, ConfirmDelete } from "@/components/ui";
+import { useAction, Badge, Money, Empty, ConfirmDelete, LoadError } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import { useCan, ADMIN_UP } from "@/components/UserProvider";
 import BookingForm from "@/components/BookingForm";
@@ -12,7 +12,7 @@ import { fmtDateTime, minsToLabel, isoDate } from "@/lib/dates";
 type SortKey = "ref" | "customer" | "date" | "total" | "status";
 
 /** A booking's value is the sum of its service lines; there is no stored total. */
-const total = (b: any) => b.items.reduce((a: number, i: any) => a + i.qty * i.priceCents, 0);
+const total = (b: any) => b.totalCents ?? b.items.reduce((a: number, i: any) => a + i.qty * i.priceCents, 0);
 
 /**
  * Defined here rather than inside the page: a component declared in the body of
@@ -42,6 +42,10 @@ function BookingsInner() {
   const t = useT();
   const sp = useSearchParams();
   const [open, setOpen] = useState(sp.get("new") === "1");
+  const [page, setPage] = useState(0);
+  const [query, setQuery] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [status, setStatus] = useState("");
   const [scope, setScope] = useState<"upcoming" | "all">("all");
   const [deleting, setDeleting] = useState<any>(null);
@@ -49,10 +53,11 @@ function BookingsInner() {
   const [dir, setDir] = useState<1 | -1>(1);
   const manage = useCan(ADMIN_UP);
 
-  const { data, loading, refresh } = useAction<any[]>("bookings.list", {
+  const { data, loading, error, refresh } = useAction<any[]>("bookings.list", {
     ...(status ? { status } : {}),
     ...(scope === "upcoming" ? { from: isoDate(new Date()) } : {}),
-    limit: 100,
+    ...(from ? { from } : {}), ...(to ? { to } : {}),
+    query: query || undefined, offset: page * 50, direction: scope === "all" ? "desc" : "asc", limit: 50,
   });
 
   /**
@@ -91,14 +96,18 @@ function BookingsInner() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
           {t("common.new")}</button>} />
 
+      <LoadError error={error} onRetry={refresh} />
       <div className="mb-3 flex flex-wrap gap-2">
+        <input className="input w-auto" placeholder="Search reference or customer…" aria-label="Search bookings" value={query} onChange={e => { setQuery(e.target.value); setPage(0); }} />
+        <input type="date" className="input w-auto" aria-label="From date" value={from} onChange={e => { setFrom(e.target.value); setPage(0); }} />
+        <input type="date" className="input w-auto" aria-label="To date" value={to} min={from} onChange={e => { setTo(e.target.value); setPage(0); }} />
         <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 text-xs font-medium">
           {(["upcoming", "all"] as const).map((s) => (
-            <button key={s} onClick={() => setScope(s)}
+            <button key={s} onClick={() => { setScope(s); setPage(0); }}
               className={`rounded-md px-3 py-1.5 capitalize transition ${scope === s ? "bg-brand-600 text-white" : "text-ink-500 hover:text-ink-800"}`}>{s}</button>
           ))}
         </div>
-        <select className="input w-auto text-xs" value={status} onChange={(e) => setStatus(e.target.value)}>
+        <select className="input w-auto text-xs" value={status} onChange={(e) => { setStatus(e.target.value); setPage(0); }}>
           <option value="">{t("common.all")} {t("common.status").toLowerCase()}</option>
           {["PENDING","CONFIRMED","COMPLETED","CANCELLED"].map((s) => <option key={s} value={s}>{t(`bk.status.${s}`)}</option>)}
         </select>
@@ -153,6 +162,11 @@ function BookingsInner() {
           </div>}
       </div>
 
+      <div className="mt-3 flex items-center justify-between text-xs text-ink-500">
+        <button className="btn-outline btn-sm" disabled={!page || loading} onClick={() => setPage(p => p - 1)}>Previous</button>
+        <span>Page {page + 1} · Sorting applies to this page</span>
+        <button className="btn-outline btn-sm" disabled={loading || (data?.length ?? 0) < 50} onClick={() => setPage(p => p + 1)}>Next</button>
+      </div>
       <BookingForm open={open} onClose={() => setOpen(false)} onDone={refresh} />
 
       <ConfirmDelete

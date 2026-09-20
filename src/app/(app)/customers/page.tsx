@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
-import { useAction, callAction, toast, Empty, ConfirmDelete, humanError } from "@/components/ui";
+import { LoadError, useAction, callAction, toast, Empty, ConfirmDelete, humanError } from "@/components/ui";
 import { CustomerForm } from "@/components/CustomerForm";
 import PageHeader from "@/components/PageHeader";
 import { useCan, ADMIN_UP, OWNER_ONLY } from "@/components/UserProvider";
@@ -17,7 +17,7 @@ export default function Customers() {
   const canEdit = useCan(ADMIN_UP);
   // customers.delete is OWNER-only in the registry; gate the button the same way.
   const canDelete = useCan(OWNER_ONLY);
-  const { data, loading, refresh } = useAction<any[]>("customers.search", { query: q || undefined, limit: 50, includeInactive: true });
+  const { data, loading, error, refresh } = useAction<any[]>("customers.search", { query: q || undefined, limit: 50, includeInactive: true });
 
   async function setActive(c: any, active: boolean) {
     setBusyId(c.id);
@@ -30,6 +30,7 @@ export default function Customers() {
 
   return (
     <div>
+      <LoadError error={error} onRetry={refresh} />
       <PageHeader title={t("nav.customers")} subtitle={`${data?.length ?? 0} ${t("nav.customers").toLowerCase()}`}
         actions={<button onClick={() => setOpen(true)} className="btn-primary btn-sm">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>

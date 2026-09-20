@@ -150,7 +150,7 @@ function RefundModal({ open, onClose, invoice, onDone }: any) {
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Record a refund">
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="Record a refund">
       <div className="space-y-3">
         <div className="rounded-lg bg-ink-50 px-3 py-2.5 text-sm">
           <div className="flex justify-between"><span className="text-ink-500">{t("inv.paid")}</span>
@@ -186,7 +186,10 @@ function PayModal({ open, onClose, invoice, onDone }: any) {
   const [method, setMethod] = useState("BANK");
   const [reference, setReference] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) { setAmount((invoice.balance / 100).toFixed(2)); setReference(""); } }, [open, invoice.id, invoice.balance]);
   async function go() {
+    const cents = toCents(amount);
+    if (cents <= 0 || cents > invoice.balance) return toast("Enter an amount greater than zero and no more than the balance", "err");
     setBusy(true);
     try {
       await callAction("payments.record", { invoiceId: invoice.id, amountCents: toCents(amount), method, reference: reference || undefined });
@@ -194,7 +197,7 @@ function PayModal({ open, onClose, invoice, onDone }: any) {
     } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
   }
   return (
-    <Modal open={open} onClose={onClose} title={t("inv.recordPayment")}>
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title={t("inv.recordPayment")}>
       <div className="space-y-3">
         <div className="rounded-lg bg-ink-50 px-3 py-2.5 text-sm">
           <div className="flex justify-between"><span className="text-ink-500">{t("inv.balance")}</span>
@@ -210,7 +213,7 @@ function PayModal({ open, onClose, invoice, onDone }: any) {
         </Field>
         <Field label={`Reference (${t("common.optional")})`}><input className="input" value={reference} onChange={(e) => setReference(e.target.value)} /></Field>
         <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
-          <button onClick={go} disabled={busy} className="btn-primary">{t("inv.recordPayment")}</button></div>
+          <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : t("inv.recordPayment")}</button></div>
       </div>
     </Modal>
   );

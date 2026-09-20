@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useT } from "./I18nProvider";
+import ActionReview from "./ActionReview";
 import { refreshAll } from "./ui";
 
 type Msg = { role: "user" | "assistant" | "system"; content: string; actions?: { name: string; ok: boolean }[] };
@@ -67,7 +68,7 @@ export default function Assistant({ open, onClose }: { open: boolean; onClose: (
 
   function send(text?: string) {
     const msg = (text ?? input).trim();
-    if (!msg || busy) return;
+    if (!msg || busy || confirm) return;
     setMsgs((m) => [...m, { role: "user", content: msg }]);
     setInput("");
     post({ message: msg });
@@ -92,7 +93,7 @@ export default function Assistant({ open, onClose }: { open: boolean; onClose: (
           </div>
           <p className="flex-1 text-sm font-semibold text-ink-900">{t("ai.title")}</p>
           {msgs.length > 0 && (
-            <button onClick={reset} className="rounded-lg px-2 py-1 text-[11px] font-medium text-ink-400 hover:bg-ink-100 hover:text-ink-700">{t("ai.clear")}</button>
+            <button disabled={busy} onClick={reset} className="rounded-lg px-2 py-1 text-[11px] font-medium text-ink-400 hover:bg-ink-100 hover:text-ink-700">{t("ai.clear")}</button>
           )}
           <button onClick={onClose} className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
@@ -148,17 +149,11 @@ export default function Assistant({ open, onClose }: { open: boolean; onClose: (
                 <p className="text-xs font-semibold text-amber-900">{t("ai.confirmTitle")}</p>
               </div>
               <p className="text-xs text-amber-800">{confirm.title}</p>
-              <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-white/70 p-2 text-[10px] leading-relaxed text-ink-600">
-{JSON.stringify(confirm.input, null, 2)}</pre>
+              <ActionReview action={confirm.action} input={confirm.input} />
               <div className="mt-2.5 flex gap-2">
                 <button onClick={() => post({ confirm })} className="btn-primary btn-sm flex-1">{t("ai.confirmRun")}</button>
                 <button onClick={() => {
-                    // Tell the server too, so the open tool call is closed and the thread stays usable.
-                    const c = confirm;
-                    setConfirm(null);
-                    setMsgs((m) => [...m, { role: "system", content: "Cancelled — nothing was changed." }]);
-                    fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ threadId: thread, confirm: { cancelled: true, toolCallId: c.toolCallId } }) }).catch(() => {});
+                    post({ confirm: { cancelled: true, toolCallId: confirm.toolCallId } });
                   }}
                   className="btn-outline btn-sm flex-1">{t("ai.confirmCancel")}</button>
               </div>
@@ -182,7 +177,7 @@ export default function Assistant({ open, onClose }: { open: boolean; onClose: (
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }}
               placeholder={t("ai.placeholder")} rows={1}
               className="input max-h-32 min-h-[40px] resize-none py-2.5" />
-            <button onClick={() => send()} disabled={busy || !input.trim()} className="btn-primary h-10 w-10 shrink-0 p-0">
+            <button onClick={() => send()} disabled={busy || !!confirm || !input.trim()} className="btn-primary h-10 w-10 shrink-0 p-0">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="m22 2-7 20-4-9-9-4z"/></svg>
             </button>
           </div>

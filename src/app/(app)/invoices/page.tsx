@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Badge, Money, Empty, Stat, callAction, toast, ConfirmDelete, humanError } from "@/components/ui";
+import { LoadError, useAction, Badge, Money, Empty, Stat, callAction, toast, ConfirmDelete, humanError } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import { useCan, ADMIN_UP, OWNER_ONLY } from "@/components/UserProvider";
 import { fmtDate } from "@/lib/dates";
@@ -16,7 +16,7 @@ export default function Invoices() {
   const canVoid = useCan(ADMIN_UP);
   // invoices.delete is OWNER-only in the registry.
   const canDelete = useCan(OWNER_ONLY);
-  const { data, loading, refresh } = useAction<any[]>("invoices.list", { ...(status ? { status } : {}), unpaidOnly: unpaid, limit: 200 });
+  const { data, loading, error, refresh } = useAction<any[]>("invoices.list", { ...(status ? { status } : {}), unpaidOnly: unpaid, limit: 200 });
   const out = useAction<any>("payments.outstanding", {});
 
   /**
@@ -35,6 +35,7 @@ export default function Invoices() {
 
   return (
     <div>
+      <LoadError error={error} onRetry={refresh} />
       <PageHeader title={t("nav.invoices")} subtitle={`${data?.length ?? 0} ${t("common.shown")}`} />
 
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">

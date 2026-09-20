@@ -18,18 +18,36 @@ export function Badge({ status, label }: { status: string; label?: string }) {
 }
 
 /* --------------------------------- Modal ---------------------------------- */
+let modalCount = 0;
+let originalOverflow = "";
 export function Modal({ open, onClose, title, children, wide }: { open: boolean; onClose: () => void; title: string; children: ReactNode; wide?: boolean }) {
+  const panel = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose); closeRef.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const h = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const previous = document.activeElement as HTMLElement | null;
+    const h = (e: KeyboardEvent) => {
+      const dialogs = document.querySelectorAll('[role="dialog"]');
+      if (dialogs[dialogs.length - 1] !== panel.current) return;
+      if (e.key === "Escape") closeRef.current();
+      if (e.key === "Tab") {
+        const items = Array.from(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]') ?? []).filter(el => el.getClientRects().length);
+        const first = items[0], last = items[items.length - 1];
+        if (e.shiftKey && (document.activeElement === first || document.activeElement === panel.current)) { e.preventDefault(); last?.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+      }
+    };
+    panel.current?.focus();
     window.addEventListener("keydown", h);
+    if (modalCount++ === 0) originalOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => { window.removeEventListener("keydown", h); document.body.style.overflow = ""; };
-  }, [open, onClose]);
+    return () => { window.removeEventListener("keydown", h); if (--modalCount === 0) document.body.style.overflow = originalOverflow; previous?.focus(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-ink-900/30 p-0 sm:p-4 backdrop-blur-[2px]" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()}
+      <div ref={panel} role="dialog" aria-modal="true" aria-label={title} tabIndex={-1} onClick={(e) => e.stopPropagation()}
         className={`w-full ${wide ? "sm:max-w-3xl" : "sm:max-w-lg"} max-h-[92vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl bg-white shadow-xl`}>
         <div className="sticky top-0 z-10 flex items-center justify-between border-b border-ink-100 bg-white px-5 py-3.5">
           <h2 className="text-base font-semibold text-ink-900">{title}</h2>
@@ -179,7 +197,7 @@ export async function callAction(name: string, input: unknown = {}): Promise<any
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
   });
   const j = await r.json();
-  if (!j.ok) throw new Error(j.error ?? "Action failed");
+  if (!j.ok) throw new Error(humanError(j.error ?? "Action failed"));
   return j.data;
 }
 
@@ -269,6 +287,7 @@ export function useAction<T>(name: string, input: unknown = {}, deps: unknown[] 
     // Blanking the screen to a spinner on every refresh is what made writes and
     // drag-and-drop feel laggy: the rows vanished and came back. Keep them.
     const sameQuestion = shownKey.current === key;
+    if (!sameQuestion) setData(null);
     if (sameQuestion) setRefreshing(true); else setLoading(true);
 
     queueAction(name, input)
@@ -303,4 +322,12 @@ export function Toaster() {
       ))}
     </div>
   );
+}
+
+export function LoadError({ error, onRetry }: { error: string | null; onRetry: () => void }) {
+  if (!error) return null;
+  return <div role="alert" className="my-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
+    <p>Unable to load this information. {humanError(error)}</p>
+    <button type="button" className="btn-outline btn-sm mt-2" onClick={onRetry}>Try again</button>
+  </div>;
 }

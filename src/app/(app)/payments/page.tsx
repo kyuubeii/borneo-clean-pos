@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Money, Empty, Stat, ConfirmDelete } from "@/components/ui";
+import { LoadError, useAction, Money, Empty, Stat, ConfirmDelete } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import { useCan, OWNER_ONLY } from "@/components/UserProvider";
 import { fmtDateTime, addDays, isoDate } from "@/lib/dates";
@@ -14,13 +14,14 @@ export default function Payments() {
   const [deleting, setDeleting] = useState<any>(null);
   // payments.delete is OWNER-only in the registry.
   const canDelete = useCan(OWNER_ONLY);
-  const { data, loading, refresh } = useAction<any[]>("payments.list", { from: isoDate(addDays(new Date(), -days)), limit: 200 });
+  const { data, loading, error, refresh } = useAction<any[]>("payments.list", { from: isoDate(addDays(new Date(), -days)), limit: 200 });
   const out = useAction<any>("payments.outstanding", {});
 
   const received = (data ?? []).reduce((a, p) => a + p.amountCents, 0);
 
   return (
     <div>
+      <LoadError error={error} onRetry={refresh} />
       <PageHeader title={t("nav.payments")} subtitle={t("common.lastDays").replace("{n}", String(days))} actions={
         <select className="input w-auto text-xs" value={days} onChange={(e) => setDays(Number(e.target.value))}>
           {[7, 30, 90, 365].map((d) => <option key={d} value={d}>{t("common.lastDays").replace("{n}", String(d))}</option>)}

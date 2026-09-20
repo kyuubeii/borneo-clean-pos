@@ -302,8 +302,9 @@ function Photos({ job, onDone }: any) {
 function AssignModal({ open, onClose, job, onDone }: any) {
   const t = useT();
   const staff = useAction<any[]>("staff.list", {});
-  const avail = useAction<any[]>("staff.findAvailable", { startAt: new Date(job.scheduledAt).toISOString(), durationMin: job.durationMin });
+  const avail = useAction<any[]>("staff.findAvailable", { startAt: new Date(job.scheduledAt).toISOString(), durationMin: job.durationMin, excludeJobId: job.id });
   const [ids, setIds] = useState<string[]>(job.assignments.map((a: any) => a.staffId));
+  useEffect(() => { if (open) { setIds(job.assignments.map((a: any) => a.staffId)); avail.refresh(); } }, [open, job.assignments]);
   const [busy, setBusy] = useState(false);
   async function go() {
     setBusy(true);
@@ -317,7 +318,7 @@ function AssignModal({ open, onClose, job, onDone }: any) {
           const a = avail.data?.find((x) => x.staffId === s.id);
           const on = ids.includes(s.id);
           return (
-            <button key={s.id} onClick={() => setIds(on ? ids.filter((x) => x !== s.id) : [...ids, s.id])}
+            <button key={s.id} disabled={!on && !a?.available} onClick={() => setIds(on ? ids.filter((x) => x !== s.id) : [...ids, s.id])}
               className={`flex w-full items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left transition ${on ? "border-brand-400 bg-brand-50" : "border-ink-200 hover:bg-ink-50"}`}>
               <span className="flex h-7 w-7 items-center justify-center rounded-full text-[10px] font-semibold text-white" style={{ background: s.colour }}>
                 {s.name.split(" ").map((x: string) => x[0]).slice(0, 2).join("")}</span>

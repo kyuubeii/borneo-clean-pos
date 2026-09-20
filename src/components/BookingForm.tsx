@@ -1,7 +1,8 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useT } from "./I18nProvider";
-import { Modal, Field, callAction, toast, Money } from "./ui";
+import CustomerPicker from "./CustomerPicker";
+import { Modal, Field, callAction, toast, Money, LoadError } from "./ui";
 import { toInput, minsToLabel } from "@/lib/dates";
 
 /** Shared create-booking flow: customer → services → when → cleaners. */
@@ -9,7 +10,10 @@ export default function BookingForm({ open, onClose, onDone, presetCustomerId, p
   open: boolean; onClose: () => void; onDone?: () => void; presetCustomerId?: string; presetStart?: Date;
 }) {
   const t = useT();
-  const [customers, setCustomers] = useState<any[]>([]);
+  const [cust, setCust] = useState<any>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const [checking, setChecking] = useState(false);
   const [services, setServices] = useState<any[]>([]);
   const [staff, setStaff] = useState<any[]>([]);
   const [avail, setAvail] = useState<any[] | null>(null);
@@ -26,35 +30,41 @@ export default function BookingForm({ open, onClose, onDone, presetCustomerId, p
 
   useEffect(() => {
     if (!open) return;
-    callAction("customers.search", { limit: 50 }).then(setCustomers).catch(() => {});
-    callAction("services.list", {}).then(setServices).catch(() => {});
-    callAction("staff.list", {}).then(setStaff).catch(() => {});
-  }, [open]);
+    let alive = true;
+    setLoadError(null);
+    Promise.all([callAction("services.list", {}), callAction("staff.list", {})]).then(([a, b]) => { if (alive) { setServices(a); setStaff(b); } }).catch(e => { if (alive) setLoadError(e.message); });
+    return () => { alive = false; };
+  }, [open, retry]);
+
+  useEffect(() => { if (open) { reset(); setStartAt(toInput(presetStart ?? nextHour())); } }, [open]);
 
   useEffect(() => { if (presetCustomerId) setCustomerId(presetCustomerId); }, [presetCustomerId]);
 
-  const cust = customers.find((c) => c.id === customerId);
   const chosen = services.filter((s) => picked.includes(s.id));
   const duration = chosen.reduce((a, s) => a + s.durationMin, 0);
   const total = chosen.reduce((a, s) => a + s.priceCents, 0);
 
   // Refresh who is free whenever the slot changes.
   useEffect(() => {
-    if (!open || !startAt || !duration) { setAvail(null); return; }
+    if (!open || !startAt || !duration) { setAvail(null); setChecking(false); return; }
+    let alive = true; setChecking(true); setAvail(null);
     callAction("staff.findAvailable", { startAt: new Date(startAt).toISOString(), durationMin: duration })
-      .then(setAvail).catch(() => setAvail(null));
+      .then(r => { if (alive) setAvail(r); }).catch(() => { if (alive) setAvail(null); }).finally(() => { if (alive) setChecking(false); });
+    return () => { alive = false; };
   }, [open, startAt, duration]);
 
   async function submit() {
     if (!customerId) return toast("Choose a customer", "err");
     if (!picked.length) return toast("Choose at least one service", "err");
+    if (!startAt || !Number.isFinite(new Date(startAt).getTime())) return toast("Choose a valid date and time", "err");
+    if (staffIds.some(id => !avail?.find(a => a.staffId === id)?.available)) return toast("Choose available cleaners, or leave this booking unassigned", "err");
     setBusy(true);
     try {
       const r = await callAction("bookings.create", {
         customerId, addressId: addressId || undefined,
         startAt: new Date(startAt).toISOString(), serviceIds: picked,
         notes: notes || undefined, recurrence,
-        recurUntil: recurrence !== "NONE" && recurUntil ? new Date(recurUntil).toISOString() : undefined,
+        recurUntil: recurrence !== "NONE" && recurUntil ? new Date(`${recurUntil}T23:59:59+08:00`).toISOString() : undefined,
         staffIds: staffIds.length ? staffIds : undefined,
       });
       toast(`Booking ${r.booking.ref} created${r.recurringCreated ? ` + ${r.recurringCreated} repeats` : ""}`);
@@ -68,14 +78,12 @@ export default function BookingForm({ open, onClose, onDone, presetCustomerId, p
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="New booking" wide>
+    <Modal open={open} onClose={() => { if (!busy) onClose(); }} title="New booking" wide>
       <div className="space-y-4">
+        <LoadError error={loadError} onRetry={() => setRetry(x => x + 1)} />
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label={t("common.customer")}>
-            <select className="input" value={customerId} onChange={(e) => { setCustomerId(e.target.value); setAddressId(""); }}>
-              <option value="">— select —</option>
-              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}{c.company ? ` (${c.company})` : ""}</option>)}
-            </select>
+            <CustomerPicker value={customerId} onChange={(id, c) => { setCustomerId(id); setCust(c ?? null); if (id !== customerId) setAddressId(""); }} />
           </Field>
           <Field label={t("common.address")}>
             <select className="input" value={addressId} onChange={(e) => setAddressId(e.target.value)} disabled={!cust}>
@@ -127,6 +135,7 @@ export default function BookingForm({ open, onClose, onDone, presetCustomerId, p
         {duration > 0 && (
           <div>
             <p className="label">Assign cleaners <span className="font-normal text-ink-300">· availability for this slot</span></p>
+            <p className="mb-2 text-xs text-ink-500">{checking ? "Checking availability…" : !avail ? "Availability could not be checked. Save without cleaners or change the time to retry." : "Unavailable cleaners cannot be assigned. You can leave this unassigned."}</p>
             <div className="flex flex-wrap gap-1.5">
               {staff.map((s) => {
                 const a = avail?.find((x) => x.staffId === s.id);
@@ -134,7 +143,7 @@ export default function BookingForm({ open, onClose, onDone, presetCustomerId, p
                 return (
                   <button key={s.id} type="button"
                     onClick={() => setStaffIds(on ? staffIds.filter((x) => x !== s.id) : [...staffIds, s.id])}
-                    title={a?.reason}
+                    disabled={!on && (checking || !a?.available)} title={a?.reason}
                     className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs transition ${
                       on ? "border-brand-400 bg-brand-50 text-brand-700"
                         : a && !a.available ? "border-ink-200 bg-ink-50 text-ink-300"
@@ -159,8 +168,8 @@ export default function BookingForm({ open, onClose, onDone, presetCustomerId, p
         </div>
 
         <div className="flex justify-end gap-2">
-          <button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
-          <button onClick={submit} disabled={busy} className="btn-primary">{busy ? t("common.saving") : "Create booking"}</button>
+          <button onClick={onClose} disabled={busy} className="btn-outline">{t("common.cancel")}</button>
+          <button onClick={submit} disabled={busy || !!loadError || (checking && staffIds.length > 0)} className="btn-primary">{busy ? t("common.saving") : "Create booking"}</button>
         </div>
       </div>
     </Modal>

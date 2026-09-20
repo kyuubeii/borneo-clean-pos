@@ -17,7 +17,7 @@ export default function BookingDetail({ params }: { params: Promise<{ id: string
   if (loading) return <p className="text-sm text-ink-400">{t("common.loading")}</p>;
   if (!b) return <Empty text="Booking not found" />;
 
-  const total = b.items.reduce((a: number, i: any) => a + i.qty * i.priceCents, 0);
+  const total = b.totalCents ?? b.items.reduce((a: number, i: any) => a + i.qty * i.priceCents, 0);
   const recurring = (b.recurrence && b.recurrence !== "NONE") || b.parentId;
 
   return (
@@ -83,6 +83,7 @@ function RescheduleModal({ open, onClose, booking, onDone }: any) {
   const [when, setWhen] = useState(toInput(new Date(booking.startAt)));
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  useEffect(() => { if (open) { setWhen(toInput(new Date(booking.startAt))); setReason(""); } }, [open, booking.startAt]);
   async function go() {
     setBusy(true);
     try {
@@ -155,9 +156,8 @@ function EditModal({ open, onClose, booking, onDone }: any) {
     try {
       await callAction("bookings.update", {
         bookingId: booking.id, durationMin: Number(f.durationMin) || booking.durationMin,
-        addressId: f.addressId || undefined, notes: f.notes, internalNotes: f.internalNotes,
+        status: f.status, addressId: f.addressId || undefined, notes: f.notes, internalNotes: f.internalNotes,
       });
-      if (f.status !== booking.status) await callAction("bookings.updateStatus", { bookingId: booking.id, status: f.status });
       toast("Booking updated"); onDone(); onClose();
     } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
   }

@@ -1,7 +1,9 @@
 "use client";
+import Link from "next/link";
+import CustomerPicker from "@/components/CustomerPicker";
 import { useState, useEffect } from "react";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Badge, Money, Empty, Modal, Field, callAction, toast, ConfirmDelete, humanError } from "@/components/ui";
+import { useAction, Badge, Money, Empty, Modal, Field, callAction, toast, ConfirmDelete, humanError, LoadError } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import { useCan, ADMIN_UP } from "@/components/UserProvider";
 import { fmtDate, toInput } from "@/lib/dates";
@@ -11,10 +13,11 @@ export default function Quotes() {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [convert, setConvert] = useState<any>(null);
+  const [preview, setPreview] = useState<any>(null);
   const [editing, setEditing] = useState<any>(null);
   const [deleting, setDeleting] = useState<any>(null);
   const manage = useCan(ADMIN_UP);
-  const { data, loading, refresh } = useAction<any[]>("quotes.list", { limit: 100 });
+  const { data, loading, error, refresh } = useAction<any[]>("quotes.list", { limit: 100 });
 
   async function setStatus(q: any, status: string) {
     try { await callAction("quotes.updateStatus", { quoteId: q.id, status }); toast("Quote updated"); refresh(); }
@@ -37,6 +40,7 @@ export default function Quotes() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12h14"/></svg>
           {t("common.new")}</button>} />
 
+      <LoadError error={error} onRetry={refresh} />
       <div className="card overflow-hidden">
         {loading ? <p className="p-4 text-sm text-ink-400">{t("common.loading")}</p>
         : !data?.length ? <Empty text={t("common.empty")} />
@@ -59,13 +63,15 @@ export default function Quotes() {
                     <td className="td"><Badge status={q.status} /></td>
                     <td className="td text-right">
                       <div className="flex justify-end gap-1">
-                        {q.status === "DRAFT" && <button onClick={() => setStatus(q, "SENT")} className="btn-ghost btn-sm">Send</button>}
-                        {q.status === "SENT" && <>
+                        {!q.convertedBookingId && q.status === "DRAFT" && <button onClick={() => setStatus(q, "SENT")} className="btn-ghost btn-sm">Mark sent</button>}
+                        {!q.convertedBookingId && q.status === "SENT" && <>
                           <button onClick={() => setStatus(q, "ACCEPTED")} className="btn-ghost btn-sm text-emerald-600">Accept</button>
                           <button onClick={() => setStatus(q, "DECLINED")} className="btn-ghost btn-sm text-red-600">Decline</button>
                         </>}
-                        {q.status === "ACCEPTED" && <button onClick={() => setConvert(q)} className="btn-outline btn-sm">Book it</button>}
-                        {manage && (
+                        {!q.convertedBookingId && q.status === "ACCEPTED" && <button onClick={() => setConvert(q)} className="btn-outline btn-sm">Book it</button>}
+                        {q.convertedBookingId && <Link className="btn-outline btn-sm" href={`/bookings/${q.convertedBookingId}`}>View booking</Link>}
+                        <button className="btn-ghost btn-sm" onClick={async () => { try { setPreview(await callAction("quotes.get", { quoteId: q.id })); } catch (e: any) { toast(e.message, "err"); } }}>Preview</button>
+                        {manage && !q.convertedBookingId && (
                           <>
                             <button onClick={() => openEdit(q)} className="btn-ghost btn-sm">{t("common.edit")}</button>
                             <button onClick={() => setDeleting(q)} title="Delete permanently"
@@ -83,6 +89,14 @@ export default function Quotes() {
           </div>}
       </div>
 
+      <Modal open={!!preview} onClose={() => setPreview(null)} title={preview?.ref ?? "Quote"} wide>
+        {preview && <div className="space-y-3"><p className="font-semibold">{preview.customer.name}</p>
+          <p className="text-sm">Valid until: {preview.validUntil ? fmtDate(new Date(preview.validUntil)) : "—"}</p>
+          {preview.items.map((i: any) => <div key={i.id} className="flex justify-between gap-3 text-sm"><span>{i.name} × {i.qty}</span><Money cents={i.qty * i.priceCents} /></div>)}
+          <p>Discount: <Money cents={preview.discount} /> · Tax: <Money cents={preview.tax} /></p>
+          <p className="font-semibold">Total: <Money cents={preview.total} /></p><p className="whitespace-pre-line text-sm">{preview.notes}</p>
+        </div>}
+      </Modal>
       <QuoteForm open={open} onClose={() => setOpen(false)} onDone={refresh} />
       <QuoteForm open={!!editing} initial={editing} onClose={() => setEditing(null)} onDone={refresh} />
       <ConvertModal quote={convert} onClose={() => setConvert(null)} onDone={refresh} />
@@ -105,7 +119,6 @@ export default function Quotes() {
 /** Create when `initial` is absent, edit when it is there. */
 function QuoteForm({ open, onClose, onDone, initial }: any) {
   const t = useT();
-  const [customers, setCustomers] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
   const [customerId, setCustomerId] = useState("");
   const [items, setItems] = useState<any[]>([{ name: "", qty: 1, price: "" }]);
@@ -116,7 +129,7 @@ function QuoteForm({ open, onClose, onDone, initial }: any) {
 
   useEffect(() => {
     if (!open) return;
-    callAction("customers.search", { limit: 50 }).then(setCustomers).catch(() => {});
+
     callAction("services.list", {}).then(setServices).catch(() => {});
   }, [open]);
 
@@ -145,7 +158,8 @@ function QuoteForm({ open, onClose, onDone, initial }: any) {
 
   async function go() {
     if (!customerId) return toast("Choose a customer", "err");
-    const valid = items.filter((i) => i.name.trim() && i.price);
+    if (items.some(i => !i.name.trim() || i.price === "" || !Number.isInteger(Number(i.qty)) || Number(i.qty) < 1 || toCents(i.price) < 0)) return toast("Complete every line with a description, quantity and valid price", "err");
+    const valid = items;
     if (!valid.length) return toast("Add at least one line item", "err");
     setBusy(true);
     const lines = valid.map((i) => ({ name: i.name, qty: Number(i.qty) || 1, priceCents: toCents(i.price), serviceId: i.serviceId || undefined }));
@@ -172,21 +186,18 @@ function QuoteForm({ open, onClose, onDone, initial }: any) {
     <Modal open={open} onClose={onClose} title={initial ? `Edit quote ${initial.ref}` : "New quote"} wide>
       <div className="space-y-3">
         <Field label={t("common.customer")}>
-          <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={!!initial}>
-            <option value="">— select —</option>
-            {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <CustomerPicker value={customerId} onChange={setCustomerId} disabled={!!initial} />
         </Field>
 
         <div>
           <p className="label">{t("inv.items")}</p>
           <div className="space-y-2">
             {items.map((it, n) => (
-              <div key={n} className="flex gap-2">
-                <select className="input w-40 shrink-0 text-xs"
+              <div key={n} className="grid grid-cols-2 gap-2 sm:flex">
+                <select className="input sm:w-40 shrink-0 text-xs"
                   onChange={(e) => {
                     const s = services.find((x) => x.id === e.target.value);
-                    if (s) setItems(items.map((x, i) => i === n ? { ...x, name: s.name, price: (s.priceCents / 100).toFixed(2), serviceId: s.id } : x));
+                    setItems(items.map((x, i) => i === n ? (s ? { ...x, name: s.name, price: (s.priceCents / 100).toFixed(2), serviceId: s.id } : { ...x, serviceId: undefined }) : x));
                   }} value={it.serviceId ?? ""}>
                   <option value="">Custom…</option>
                   {services.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
