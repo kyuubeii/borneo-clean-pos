@@ -193,7 +193,9 @@ performance problem stacked on the first.
 
 ---
 
-## 5. What was changed (2026-09-20)
+## 5. What was changed (2026-09-20) — live in production
+
+Commits `4473029` and `97b4eb7`, deployed and verified.
 
 Everything in §2 and §3 has been implemented except the user-row cache, which
 was deliberately skipped (see below). Measured against the same live database:
@@ -217,24 +219,35 @@ largest win, and it likely also collapses most of the 6x pooler overhead: the
 extra ~410 ms was roughly 4.5 × the 91 ms round trip, consistent with the pooler
 making several round trips per query — cheap once it is next to the database.
 
-**This is not yet verified in production.** Deployments on this Vercel account
-are currently hanging in `UNKNOWN` / `Building…` and never completing — a
-pre-existing condition, not caused by these changes: four of the account's own
-deployments from 20-21h ago sit in the same state. Two preview deploys attempted
-here (`yoq4pt65q`, `ewe8q3eym`) both stalled with no retrievable build logs.
+**Verified live on 2026-09-20.** Once the GitHub repository was connected to the
+Vercel project, deploys completed normally (49s and 1m) — the earlier CLI deploys
+that hung in `UNKNOWN` were unrelated to these changes. Production now answers:
 
-Once a deploy does complete, verify the region took effect — on a Hobby plan
-`regions` in `vercel.json` is sometimes ignored in favour of Project Settings →
-Functions → Function Region:
+```
+x-matched-path: /api/actions/[name]
+x-vercel-id:    sin1::sin1::…
+```
+
+Both segments `sin1`, on the real function rather than a build placeholder. The
+function is now in the same region as the database.
+
+Measured against production, same method as the baseline (`POST
+/api/actions/reports.summary`, unauthenticated, so it times routing plus auth
+with no database work):
+
+| | Before | After |
+|---|---|---|
+| Auth path, 5 samples | 0.66 – 1.55 s | **0.23 – 0.49 s** |
+
+Re-check the region after any change to the project's settings:
 
 ```
 curl -sD- -o /dev/null -X POST https://borneoclean.vercel.app/api/actions/reports.summary | grep x-vercel-id
 ```
 
-It should read `sin1::sin1::…`, not `sin1::iad1::…`. Note that a deployment
-still building answers with `x-matched-path: /[[...slug]]` and returns
-`sin1::sin1::` from the placeholder regardless — check that `x-matched-path`
-reads `/api/actions/[name]` before trusting the region.
+It should read `sin1::sin1::…`, not `sin1::iad1::…`. One trap: a deployment that
+is still building answers `sin1::sin1::` from a placeholder regardless, so check
+that `x-matched-path` reads `/api/actions/[name]` before trusting the region.
 
 If it still says `iad1`, the remaining lever is Project Settings → Functions →
 Function Region, which is dashboard-only and cannot be set from the repo.
