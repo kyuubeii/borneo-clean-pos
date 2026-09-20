@@ -64,6 +64,12 @@ export default function Shell({ user, children }: { user: { id: string; name: st
     router.push("/login"); router.refresh();
   }
 
+  // prefetch is off on the nav links below on purpose. Adding a loading boundary
+  // to the (app) segment switches Next's automatic prefetching on for these
+  // dynamic routes, and all fifteen are in the viewport at once on desktop --
+  // so every page view would fan out into fifteen server renders, each one
+  // running the layout's getUser(). The loading boundary already makes the click
+  // feel immediate; this keeps that from costing fifteen invocations a page.
   const nav = (
     <nav className="flex flex-col gap-5 px-3 py-4">
       {GROUPS.map((g) => {
@@ -76,7 +82,7 @@ export default function Shell({ user, children }: { user: { id: string; name: st
               {items.map((i) => {
                 const active = path === i.href || path.startsWith(i.href + "/");
                 return (
-                  <Link key={i.href} href={i.href}
+                  <Link key={i.href} href={i.href} prefetch={false}
                     className={`flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition ${
                       active ? "bg-brand-50 text-brand-700" : "text-ink-600 hover:bg-ink-100 hover:text-ink-900"}`}>
                     <span className={active ? "text-brand-600" : "text-ink-400"}>{i.icon}</span>

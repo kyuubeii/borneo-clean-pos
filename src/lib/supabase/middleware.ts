@@ -28,7 +28,18 @@ export async function refreshSession(request: NextRequest) {
     },
   });
 
-  // Touching the user is what triggers the refresh; the result is unused here.
-  await supabase.auth.getUser();
+  // getSession(), not getUser().
+  //
+  // getUser() validates the JWT against Supabase's servers on every call, so it
+  // put a network round trip in front of every page navigation -- which is what
+  // made clicking around the sidebar feel slow. getSession() reads the session
+  // out of the cookie and only goes to the network when the access token is
+  // within 90 seconds of expiring, which is precisely when a refresh is due.
+  //
+  // The usual objection to getSession() is that its session is unverified. That
+  // does not apply here: this middleware makes no authorisation decision. It
+  // rotates the token and nothing else. Every access decision is made in the
+  // action registry, behind getUser(), which does verify.
+  await supabase.auth.getSession();
   return response;
 }
