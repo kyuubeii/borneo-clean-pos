@@ -1,7 +1,8 @@
 "use client";
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Stat, Badge, Money, Empty } from "@/components/ui";
+import { useAction, Stat, Badge, Money, Empty, LoadError } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import StaffDashboard from "@/components/StaffDashboard";
 import { useIsStaff } from "@/components/UserProvider";
@@ -31,6 +32,17 @@ function OwnerDashboard() {
   const attention = b?.needsAttention;
   const hasAttention = attention && (attention.unassignedJobs?.length > 0 || attention.overdueInvoices > 0);
 
+  /**
+   * A figure that has not arrived is not a figure of zero.
+   *
+   * These headline numbers used to fall back to `?? 0`, so a query that failed
+   * or had not answered yet showed a confident RM 0.00 — indistinguishable from
+   * a month with no sales, and alarming on the one screen that is read at a
+   * glance. An absent figure now reads as a dash, and the reason sits above it.
+   */
+  const figure = (q: { data: any; error: string | null }, render: (d: any) => ReactNode) =>
+    q.data ? render(q.data) : <span className="text-ink-300">{q.error ? "unavailable" : "—"}</span>;
+
   return (
     <div className="space-y-4">
       <PageHeader title={t("dash.title")} subtitle={fmtDate(today)} actions={
@@ -43,17 +55,19 @@ function OwnerDashboard() {
         </>
       } />
 
+      <LoadError error={summary.error ?? outstanding.error} onRetry={() => { summary.refresh(); outstanding.refresh(); brief.refresh(); trend.refresh(); }} />
+
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label={t("dash.salesMonth")} value={<Money cents={s?.salesCents ?? 0} />}
-          sub={<>{t("dash.collected")} <Money cents={s?.revenueCollectedCents ?? 0} /> · {t("dash.profit")} <Money cents={s?.profitCents ?? 0} /> ({s?.marginPct ?? 0}%)</>}
-          tone={(s?.profitCents ?? 0) >= 0 ? "good" : "bad"} />
-        <Stat label={t("dash.outstanding")} value={<Money cents={o?.totalOutstandingCents ?? 0} />}
-          sub={`${o?.openInvoices ?? 0} open · ${o?.overdueInvoices ?? 0} ${t("dash.overdueInvoices")}`}
-          tone={(o?.overdueCents ?? 0) > 0 ? "warn" : "default"} />
-        <Stat label={t("dash.jobsThisMonth")} value={s?.jobsScheduled ?? 0}
-          sub={`${s?.jobsCompleted ?? 0} ${t("dash.completed").toLowerCase()}`} />
-        <Stat label={t("dash.avgJob")} value={<Money cents={s?.avgJobValueCents ?? 0} />}
-          sub={`${s?.newCustomers ?? 0} ${t("dash.newCustomers").toLowerCase()}`} />
+        <Stat label={t("dash.salesMonth")} value={figure(summary, (d) => <Money cents={d.salesCents} />)}
+          sub={s && <>{t("dash.collected")} <Money cents={s.revenueCollectedCents} /> · {t("dash.profit")} <Money cents={s.profitCents} /> ({s.marginPct}%)</>}
+          tone={!s ? "default" : s.profitCents >= 0 ? "good" : "bad"} />
+        <Stat label={t("dash.outstanding")} value={figure(outstanding, (d) => <Money cents={d.totalOutstandingCents} />)}
+          sub={o && `${o.openInvoices} open · ${o.overdueInvoices} ${t("dash.overdueInvoices")}`}
+          tone={o && o.overdueCents > 0 ? "warn" : "default"} />
+        <Stat label={t("dash.jobsThisMonth")} value={figure(summary, (d) => d.jobsScheduled)}
+          sub={s && `${s.jobsCompleted} ${t("dash.completed").toLowerCase()}`} />
+        <Stat label={t("dash.avgJob")} value={figure(summary, (d) => <Money cents={d.avgJobValueCents} />)}
+          sub={s && `${s.newCustomers} ${t("dash.newCustomers").toLowerCase()}`} />
       </div>
 
       {hasAttention && (
