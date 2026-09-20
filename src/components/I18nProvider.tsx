@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { translate, type Locale } from "@/lib/i18n";
 
 const Ctx = createContext<{ locale: Locale; setLocale: (l: Locale) => void; t: (k: string) => string }>({
@@ -17,7 +17,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem("bc_locale", l); } catch {}
     document.documentElement.lang = l === "zh" ? "zh-CN" : "en";
   };
-  return <Ctx.Provider value={{ locale, setLocale, t: (k) => translate(locale, k) }}>{children}</Ctx.Provider>;
+  // Memoised: a fresh object here re-renders every component that calls t(),
+  // which is very nearly all of them.
+  const value = useMemo(() => ({ locale, setLocale, t: (k: string) => translate(locale, k) }), [locale]);
+  return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
 export const useI18n = () => useContext(Ctx);

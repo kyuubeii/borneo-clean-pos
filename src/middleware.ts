@@ -12,7 +12,13 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Everything except static assets and image files.
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
+    // Page and RSC navigations only.
+    //
+    // /api is deliberately excluded. Every API call was paying for a Supabase
+    // Auth round trip here and a second one in the handler, and the dashboard
+    // makes several per page. Route Handlers -- unlike Server Components -- can
+    // write cookies, so supabaseServer() rotates the token itself on those
+    // requests; nothing is lost by not doing it twice.
+    "/((?!api/|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)",
   ],
 };

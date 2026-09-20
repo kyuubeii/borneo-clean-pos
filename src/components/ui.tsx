@@ -74,7 +74,12 @@ export function Empty({ text }: { text: string }) {
 }
 
 /* ------------------------------ Action client ----------------------------- */
-/** Calls an action through the same registry the assistant uses. */
+/**
+ * Calls one action through the same registry the assistant uses.
+ *
+ * This is the write path. It is never batched: a write and a read issued in the
+ * same tick must not be able to overtake each other.
+ */
 export async function callAction(name: string, input: unknown = {}): Promise<any> {
   const r = await fetch(`/api/actions/${name}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
@@ -84,6 +89,66 @@ export async function callAction(name: string, input: unknown = {}): Promise<any
   return j.data;
 }
 
+/* --- Read batching -------------------------------------------------------- */
+/**
+ * Reads issued in the same tick go out as one request.
+ *
+ * Mounting a page fires every useAction at once. Sent separately they each pay
+ * for their own authentication round trip and compete for the same database
+ * connections; the dashboard alone did this seven times over.
+ */
+type Queued = { name: string; input: unknown; resolve: (v: any) => void; reject: (e: any) => void };
+let queue: Queued[] = [];
+let scheduled = false;
+
+async function flush() {
+  const batch = queue;
+  queue = [];
+  scheduled = false;
+  if (batch.length === 0) return;
+
+  // A lone read is cheaper as a plain call than wrapped in a batch envelope.
+  if (batch.length === 1) {
+    const only = batch[0];
+    try { only.resolve(await callAction(only.name, only.input)); } catch (e) { only.reject(e); }
+    return;
+  }
+
+  try {
+    const r = await fetch("/api/actions/batch", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ calls: batch.map((b) => ({ name: b.name, input: b.input })) }),
+    });
+    const j = await r.json();
+    if (!j.ok || !Array.isArray(j.results)) throw new Error(j.error ?? "Batch failed");
+
+    await Promise.all(batch.map(async (b, i) => {
+      const res = j.results[i];
+      if (res?.ok) return b.resolve(res.data);
+      // An action the batch endpoint will not run (a write, say) still works on
+      // its own, so fall back rather than surfacing an error the caller cannot act on.
+      if (res?.code === "NOT_BATCHABLE") {
+        try { return b.resolve(await callAction(b.name, b.input)); } catch (e) { return b.reject(e); }
+      }
+      b.reject(new Error(res?.error ?? "Action failed"));
+    }));
+  } catch (e) {
+    // The batch route itself failed. Retry each call individually so a single
+    // broken endpoint cannot take down every read on the page.
+    await Promise.all(batch.map(async (b) => {
+      try { b.resolve(await callAction(b.name, b.input)); } catch (err) { b.reject(err); }
+    }));
+  }
+}
+
+/** Queue a read-only action; resolves with its data, same shape as callAction. */
+export function queueAction(name: string, input: unknown = {}): Promise<any> {
+  return new Promise((resolve, reject) => {
+    queue.push({ name, input, resolve, reject });
+    if (!scheduled) { scheduled = true; queueMicrotask(flush); }
+  });
+}
+
 /** Lets a write anywhere (notably the AI assistant) re-fetch every live useAction. */
 const refreshListeners = new Set<() => void>();
 export const refreshAll = () => refreshListeners.forEach((l) => l());
@@ -91,25 +156,36 @@ export const refreshAll = () => refreshListeners.forEach((l) => l());
 export function useAction<T>(name: string, input: unknown = {}, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const key = JSON.stringify(input);
   const [tick, setTick] = useState(0);
+  // What the data on screen was fetched for. A re-fetch for the same question
+  // keeps the old answer visible; a different question does not.
+  const shownKey = useRef<string | null>(null);
+
   useEffect(() => {
     const l = () => setTick((x) => x + 1);
     refreshListeners.add(l);
     return () => { refreshListeners.delete(l); };
   }, []);
+
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    callAction(name, input)
-      .then((d) => alive && (setData(d), setError(null)))
-      .catch((e) => alive && setError(e.message))
-      .finally(() => alive && setLoading(false));
+    // Blanking the screen to a spinner on every refresh is what made writes and
+    // drag-and-drop feel laggy: the rows vanished and came back. Keep them.
+    const sameQuestion = shownKey.current === key;
+    if (sameQuestion) setRefreshing(true); else setLoading(true);
+
+    queueAction(name, input)
+      .then((d) => { if (alive) { setData(d); setError(null); shownKey.current = key; } })
+      .catch((e) => { if (alive) setError(e.message); })
+      .finally(() => { if (alive) { setLoading(false); setRefreshing(false); } });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name, key, tick, ...deps]);
-  return { data, loading, error, refresh: () => setTick((t) => t + 1) };
+
+  return { data, loading, refreshing, error, refresh: () => setTick((t) => t + 1) };
 }
 
 /* -------------------------------- Toasts ---------------------------------- */

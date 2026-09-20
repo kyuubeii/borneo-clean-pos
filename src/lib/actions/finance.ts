@@ -254,7 +254,12 @@ defineAction({
   category: "Payments", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({}),
   handler: async () => {
-    const invs = await db.invoice.findMany({ where: { status: { notIn: ["VOID", "DRAFT"] } }, include: { items: true, payments: true, customer: true } });
+    // Only invoices that can still carry a balance. `notIn: [VOID, DRAFT]` pulled
+    // every PAID invoice ever raised as well, just to compute a zero balance.
+    const invs = await db.invoice.findMany({
+      where: { status: { in: ["SENT", "PARTIAL", "OVERDUE"] } },
+      include: { items: true, payments: true, customer: { select: { id: true, name: true } } },
+    });
     const open = invs.map((i) => ({ inv: i, t: invoiceTotals(i) })).filter((x) => x.t.balance > 0);
     const byCustomer = new Map<string, { customer: string; customerId: string; balanceCents: number; invoices: number }>();
     for (const { inv, t } of open) {

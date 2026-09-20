@@ -13,8 +13,12 @@ function range(from?: string, to?: string) {
 
 /** Revenue is recognised from payments received, not invoices raised. */
 async function revenueIn(gte: Date, lte: Date) {
-  const pays = await db.payment.findMany({ where: { paidAt: { gte, lte } } });
-  return pays.reduce((a, p) => a + (p.isRefund ? -p.amountCents : p.amountCents), 0);
+  // Summed in the database, in one round trip. Loading every payment row to add
+  // it up in JS cost the same trip but grew with the table.
+  const rows = await db.payment.groupBy({
+    by: ["isRefund"], _sum: { amountCents: true }, where: { paidAt: { gte, lte } },
+  });
+  return rows.reduce((a, r) => a + (r.isRefund ? -1 : 1) * (r._sum.amountCents ?? 0), 0);
 }
 
 defineAction({
@@ -24,11 +28,16 @@ defineAction({
   input: z.object({ from: z.string().optional().describe("ISO date; defaults to start of this month"), to: z.string().optional() }),
   handler: async ({ from, to }) => {
     const { gte, lte } = range(from, to);
-    const revenue = await revenueIn(gte, lte);
-    const invoices = await db.invoice.findMany({ where: { issuedAt: { gte, lte }, status: { not: "VOID" } }, include: { items: true, payments: true } });
+    // Five independent queries. Awaited one after another they cost the sum of
+    // five round trips; nothing here depends on anything else, so they go together.
+    const [revenue, invoices, expenses, jobs, newCustomers] = await Promise.all([
+      revenueIn(gte, lte),
+      db.invoice.findMany({ where: { issuedAt: { gte, lte }, status: { not: "VOID" } }, include: { items: true, payments: true } }),
+      db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte } } }),
+      db.job.findMany({ where: { scheduledAt: { gte, lte } }, include: { assignments: { include: { staff: true } }, timeEntries: true } }),
+      db.customer.count({ where: { createdAt: { gte, lte } } }),
+    ]);
     const invoiced = invoices.reduce((a, i) => a + invoiceTotals(i).total, 0);
-    const expenses = await db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte } } });
-    const jobs = await db.job.findMany({ where: { scheduledAt: { gte, lte } }, include: { assignments: { include: { staff: true } }, timeEntries: true } });
 
     let labour = 0;
     for (const j of jobs.filter((x) => x.status === "COMPLETED")) {
@@ -47,7 +56,6 @@ defineAction({
     // (cash in vs accrued costs) understates profit whenever customers pay late.
     const salesCents = jobs.filter((j) => j.status !== "CANCELLED").reduce((a, j) => a + j.revenueCents, 0);
     const profit = salesCents - expenseCents - labour;
-    const newCustomers = await db.customer.count({ where: { createdAt: { gte, lte } } });
     return {
       from: gte, to: lte,
       salesCents, revenueCollectedCents: revenue, invoicedCents: invoiced,
@@ -123,19 +131,42 @@ defineAction({
   input: z.object({ from: z.string().optional(), to: z.string().optional() }),
   handler: async ({ from, to }) => {
     const { gte, lte } = range(from, to);
-    const staff = await db.staff.findMany({ where: { active: true } });
-    const out = [];
-    for (const s of staff) {
-      const jobs = await db.job.findMany({ where: { assignments: { some: { staffId: s.id } }, scheduledAt: { gte, lte } } });
-      const entries = await db.timeEntry.findMany({ where: { staffId: s.id, startAt: { gte, lte }, endAt: { not: null } } });
-      const minutes = entries.reduce((a, e) => a + (e.endAt!.getTime() - e.startAt.getTime()) / 60000, 0);
-      const completed = jobs.filter((j) => j.status === "COMPLETED");
-      out.push({ staffId: s.id, name: s.name, jobsAssigned: jobs.length, jobsCompleted: completed.length,
-        completionRate: jobs.length ? +((completed.length / jobs.length) * 100).toFixed(0) : 0,
-        hours: +(minutes / 60).toFixed(1),
-        revenueGeneratedCents: completed.reduce((a, j) => a + j.revenueCents, 0) });
+    // Three queries total, whatever the headcount. This used to run two queries
+    // per staff member in a loop, so twenty cleaners meant forty round trips.
+    const [staff, jobs, entries] = await Promise.all([
+      db.staff.findMany({ where: { active: true } }),
+      db.job.findMany({
+        where: { scheduledAt: { gte, lte }, assignments: { some: { staff: { active: true } } } },
+        select: { status: true, revenueCents: true, assignments: { select: { staffId: true } } },
+      }),
+      db.timeEntry.findMany({
+        where: { startAt: { gte, lte }, endAt: { not: null } },
+        select: { staffId: true, startAt: true, endAt: true },
+      }),
+    ]);
+
+    const minutesBy = new Map<string, number>();
+    for (const e of entries) {
+      minutesBy.set(e.staffId, (minutesBy.get(e.staffId) ?? 0) + (e.endAt!.getTime() - e.startAt.getTime()) / 60000);
     }
-    return out.sort((a, b) => b.revenueGeneratedCents - a.revenueGeneratedCents);
+    const jobsBy = new Map<string, { assigned: number; completed: number; revenueCents: number }>();
+    for (const j of jobs) {
+      for (const a of j.assignments) {
+        const e = jobsBy.get(a.staffId) ?? { assigned: 0, completed: 0, revenueCents: 0 };
+        e.assigned++;
+        if (j.status === "COMPLETED") { e.completed++; e.revenueCents += j.revenueCents; }
+        jobsBy.set(a.staffId, e);
+      }
+    }
+
+    return staff.map((s) => {
+      const j = jobsBy.get(s.id) ?? { assigned: 0, completed: 0, revenueCents: 0 };
+      const minutes = minutesBy.get(s.id) ?? 0;
+      return { staffId: s.id, name: s.name, jobsAssigned: j.assigned, jobsCompleted: j.completed,
+        completionRate: j.assigned ? +((j.completed / j.assigned) * 100).toFixed(0) : 0,
+        hours: +(minutes / 60).toFixed(1),
+        revenueGeneratedCents: j.revenueCents };
+    }).sort((a, b) => b.revenueGeneratedCents - a.revenueGeneratedCents);
   },
 });
 
@@ -165,13 +196,17 @@ defineAction({
   handler: async ({ date }) => {
     const d = date ? new Date(date) : new Date();
     const gte = startOfDay(d), lte = endOfDay(d);
-    const jobs = await db.job.findMany({ where: { scheduledAt: { gte, lte } },
-      include: { customer: true, assignments: { include: { staff: true } } }, orderBy: { scheduledAt: "asc" } });
-    const revenue = await revenueIn(gte, lte);
-    const newBookings = await db.booking.count({ where: { createdAt: { gte, lte } } });
-    const expenses = await db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte } } });
+    // Independent queries, issued together rather than one round trip at a time.
+    const [jobs, revenue, newBookings, expenses, outstanding] = await Promise.all([
+      db.job.findMany({ where: { scheduledAt: { gte, lte } },
+        include: { customer: true, assignments: { include: { staff: true } } }, orderBy: { scheduledAt: "asc" } }),
+      revenueIn(gte, lte),
+      db.booking.count({ where: { createdAt: { gte, lte } } }),
+      db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte } } }),
+      db.invoice.findMany({ where: { dueAt: { lt: new Date() }, status: { in: ["SENT", "PARTIAL", "OVERDUE"] } },
+        include: { items: true, payments: true } }),
+    ]);
     const unassigned = jobs.filter((j) => j.assignments.length === 0 && j.status !== "CANCELLED");
-    const outstanding = await db.invoice.findMany({ where: { dueAt: { lt: new Date() }, status: { in: ["SENT", "PARTIAL", "OVERDUE"] } }, include: { items: true, payments: true } });
     return {
       date: gte,
       jobs: jobs.map((j) => ({ ref: j.ref, time: j.scheduledAt, customer: j.customer.name, status: j.status,

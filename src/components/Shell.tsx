@@ -46,9 +46,16 @@ export default function Shell({ user, children }: { user: { id: string; name: st
   const [bell, setBell] = useState(false);
 
   useEffect(() => { setMobileNav(false); }, [path]);
+  // Once per session, then on a slow poll. This used to re-fetch on every
+  // navigation, putting a request in front of each page change for a bell badge.
   useEffect(() => {
-    fetch("/api/notifications").then((r) => r.json()).then((j) => setNotes(j.items ?? [])).catch(() => {});
-  }, [path]);
+    let alive = true;
+    const load = () => fetch("/api/notifications").then((r) => r.json())
+      .then((j) => { if (alive) setNotes(j.items ?? []); }).catch(() => {});
+    load();
+    const id = setInterval(load, 60_000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
 
   const unread = notes.filter((n) => !n.read).length;
 

@@ -61,6 +61,7 @@ model Availability {
   weekday  Int    // 0=Sun
   startMin Int    // minutes from midnight
   endMin   Int
+  @@index([staffId])
 }
 
 model Customer {
@@ -94,6 +95,7 @@ model Address {
   accessNotes String?
   bookings   Booking[]
   jobs       Job[]
+  @@index([customerId])
 }
 
 model Service {
@@ -136,6 +138,9 @@ model Booking {
   items       BookingItem[]
   job         Job?
   quoteId     String?
+  @@index([startAt])
+  @@index([customerId])
+  @@index([status])
 }
 
 model BookingItem {
@@ -147,6 +152,8 @@ model BookingItem {
   qty        Int     @default(1)
   priceCents Int
   name       String
+  @@index([bookingId])
+  @@index([serviceId])
 }
 
 model Job {
@@ -175,6 +182,9 @@ model Job {
   expenses    Expense[]
   invoiceId   String?
   invoice     Invoice? @relation(fields: [invoiceId], references: [id])
+  @@index([scheduledAt])
+  @@index([customerId])
+  @@index([status])
 }
 
 model JobAssignment {
@@ -185,6 +195,7 @@ model JobAssignment {
   staff   Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
   isLead  Boolean @default(false)
   @@unique([jobId, staffId])
+  @@index([staffId])
 }
 
 model ChecklistItem {
@@ -194,6 +205,7 @@ model ChecklistItem {
   label  String
   done   Boolean @default(false)
   sort   Int     @default(0)
+  @@index([jobId])
 }
 
 model Photo {
@@ -204,6 +216,7 @@ model Photo {
   kind     String @default("BEFORE") // BEFORE | AFTER | ATTACHMENT
   caption  String?
   createdAt DateTime @default(now())
+  @@index([jobId])
 }
 
 model TimeEntry {
@@ -215,6 +228,8 @@ model TimeEntry {
   startAt   DateTime
   endAt     DateTime?
   note      String?
+  @@index([staffId, startAt])
+  @@index([jobId])
 }
 
 model Quote {
@@ -231,6 +246,8 @@ model Quote {
   convertedBookingId String?
   createdAt  DateTime @default(now())
   items      QuoteItem[]
+  @@index([customerId])
+  @@index([status])
 }
 
 model QuoteItem {
@@ -242,6 +259,7 @@ model QuoteItem {
   name      String
   qty       Int     @default(1)
   priceCents Int
+  @@index([quoteId])
 }
 
 model Invoice {
@@ -259,6 +277,10 @@ model Invoice {
   items      InvoiceItem[]
   payments   Payment[]
   jobs       Job[]
+  @@index([status])
+  @@index([customerId])
+  @@index([issuedAt])
+  @@index([dueAt])
 }
 
 model InvoiceItem {
@@ -268,6 +290,7 @@ model InvoiceItem {
   name      String
   qty       Int     @default(1)
   priceCents Int
+  @@index([invoiceId])
 }
 
 model Payment {
@@ -286,6 +309,9 @@ model Payment {
   receivedById String?
   receivedBy Staff?   @relation("Collected", fields: [receivedById], references: [id])
   createdAt  DateTime @default(now())
+  @@index([paidAt])
+  @@index([invoiceId])
+  @@index([customerId])
 }
 
 model ExpenseCategory {
@@ -312,6 +338,10 @@ model Expense {
   reimbursable Boolean @default(false)
   reimbursed  Boolean  @default(false)
   createdAt   DateTime @default(now())
+  @@index([spentAt])
+  @@index([categoryId])
+  @@index([jobId])
+  @@index([staffId])
 }
 
 model Payout {
@@ -327,6 +357,7 @@ model Payout {
   paidAt     DateTime?
   note       String?
   createdAt  DateTime @default(now())
+  @@index([staffId])
 }
 
 model Notification {
@@ -339,6 +370,7 @@ model Notification {
   link      String?
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+  @@index([userId, createdAt])
 }
 
 model AuditLog {
@@ -354,6 +386,8 @@ model AuditLog {
   result    String?
   ok        Boolean  @default(true)
   createdAt DateTime @default(now())
+  @@index([createdAt])
+  @@index([source])
 }
 
 model Setting {
