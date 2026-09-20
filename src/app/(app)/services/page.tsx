@@ -1,8 +1,9 @@
 "use client";
 import { useState } from "react";
 import { useT, useI18n } from "@/components/I18nProvider";
-import { useAction, Modal, Field, callAction, toast, Money, Empty } from "@/components/ui";
+import { useAction, Modal, Field, callAction, toast, Money, Empty, ConfirmDelete, humanError } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
+import { useCan, ADMIN_UP } from "@/components/UserProvider";
 import { minsToLabel } from "@/lib/dates";
 import { toCents } from "@/lib/money";
 
@@ -11,7 +12,18 @@ export default function Services() {
   const { locale } = useI18n();
   const [open, setOpen] = useState(false);
   const [edit, setEdit] = useState<any>(null);
+  const [deleting, setDeleting] = useState<any>(null);
+  const manage = useCan(ADMIN_UP);
   const { data, loading, refresh } = useAction<any[]>("services.list", { includeInactive: true });
+
+  /** The ServiceForm already edits `active`; this is the one-click version. */
+  async function setActive(sv: any, active: boolean) {
+    try {
+      await callAction("services.update", { serviceId: sv.id, active });
+      toast(active ? `${sv.name} reactivated` : `${sv.name} deactivated \u2014 existing bookings keep their price`);
+      refresh();
+    } catch (e: any) { toast(humanError(e.message), "err"); }
+  }
 
   const main = (data ?? []).filter((s) => !s.isAddon);
   const addons = (data ?? []).filter((s) => s.isAddon);
@@ -25,17 +37,32 @@ export default function Services() {
 
       {loading ? <p className="text-sm text-ink-400">{t("common.loading")}</p> : (
         <div className="space-y-4">
-          <Group title="Services" rows={main} locale={locale} onEdit={(s: any) => { setEdit(s); setOpen(true); }} />
-          <Group title="Add-ons" rows={addons} locale={locale} onEdit={(s: any) => { setEdit(s); setOpen(true); }} />
+          <Group title="Services" rows={main} locale={locale} manage={manage}
+            onEdit={(s: any) => { setEdit(s); setOpen(true); }} onToggle={setActive} onDelete={setDeleting} />
+          <Group title="Add-ons" rows={addons} locale={locale} manage={manage}
+            onEdit={(s: any) => { setEdit(s); setOpen(true); }} onToggle={setActive} onDelete={setDeleting} />
         </div>
       )}
 
       <ServiceForm open={open} onClose={() => setOpen(false)} onDone={refresh} initial={edit} />
+
+      <ConfirmDelete
+        open={!!deleting} onClose={() => setDeleting(null)} onDone={refresh}
+        title="Delete service permanently"
+        action="services.delete" input={{ serviceId: deleting?.id }}
+        confirmText={deleting?.name} confirmLabel="the service name"
+        alternative={<>To retire it from new bookings while keeping past ones intact, close this and use <strong>Deactivate</strong>.</>}>
+        <strong>{deleting?.name}</strong> is removed from the catalogue for good.
+        This cannot be undone.
+        <br /><br />
+        It only works for a service that has never been booked or quoted. Once it appears
+        on any record, it has to stay so those prices still make sense.
+      </ConfirmDelete>
     </div>
   );
 }
 
-function Group({ title, rows, onEdit, locale }: any) {
+function Group({ title, rows, onEdit, onToggle, onDelete, locale, manage }: any) {
   const t = useT();
   if (!rows.length) return null;
   return (
@@ -60,7 +87,20 @@ function Group({ title, rows, onEdit, locale }: any) {
                 <td className="td text-right text-ink-400"><Money cents={s.materialCostCents} /></td>
                 <td className="td text-right font-medium text-ink-900"><Money cents={s.priceCents} /></td>
                 <td className="td text-right">
-                  <button onClick={() => onEdit(s)} className="btn-ghost btn-sm">{t("common.edit")}</button>
+                  <div className="flex items-center justify-end gap-1.5">
+                    <button onClick={() => onEdit(s)} className="btn-ghost btn-sm">{t("common.edit")}</button>
+                    {manage && (
+                      <>
+                        <button onClick={() => onToggle(s, !s.active)} className="btn-outline btn-sm whitespace-nowrap">
+                          {s.active ? "Deactivate" : "Reactivate"}
+                        </button>
+                        <button onClick={() => onDelete(s)} title="Delete permanently"
+                          className="rounded-lg border border-ink-200 p-1.5 text-ink-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

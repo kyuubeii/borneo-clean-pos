@@ -1,8 +1,9 @@
 "use client";
 import { useState, useEffect } from "react";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Badge, Money, Empty, Modal, Field, callAction, toast } from "@/components/ui";
+import { useAction, Badge, Money, Empty, Modal, Field, callAction, toast, ConfirmDelete, humanError } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
+import { useCan, ADMIN_UP } from "@/components/UserProvider";
 import { fmtDate, toInput } from "@/lib/dates";
 import { toCents } from "@/lib/money";
 
@@ -10,11 +11,23 @@ export default function Quotes() {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [convert, setConvert] = useState<any>(null);
+  const [editing, setEditing] = useState<any>(null);
+  const [deleting, setDeleting] = useState<any>(null);
+  const manage = useCan(ADMIN_UP);
   const { data, loading, refresh } = useAction<any[]>("quotes.list", { limit: 100 });
 
   async function setStatus(q: any, status: string) {
     try { await callAction("quotes.updateStatus", { quoteId: q.id, status }); toast("Quote updated"); refresh(); }
-    catch (e: any) { toast(e.message, "err"); }
+    catch (e: any) { toast(humanError(e.message), "err"); }
+  }
+
+  /**
+   * quotes.list returns a summary, but editing needs the line items, so the full
+   * record is fetched before the form opens.
+   */
+  async function openEdit(q: any) {
+    try { setEditing(await callAction("quotes.get", { quoteId: q.id })); }
+    catch (e: any) { toast(humanError(e.message), "err"); }
   }
 
   return (
@@ -52,6 +65,15 @@ export default function Quotes() {
                           <button onClick={() => setStatus(q, "DECLINED")} className="btn-ghost btn-sm text-red-600">Decline</button>
                         </>}
                         {q.status === "ACCEPTED" && <button onClick={() => setConvert(q)} className="btn-outline btn-sm">Book it</button>}
+                        {manage && (
+                          <>
+                            <button onClick={() => openEdit(q)} className="btn-ghost btn-sm">{t("common.edit")}</button>
+                            <button onClick={() => setDeleting(q)} title="Delete permanently"
+                              className="rounded-lg border border-ink-200 p-1.5 text-ink-400 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -62,12 +84,26 @@ export default function Quotes() {
       </div>
 
       <QuoteForm open={open} onClose={() => setOpen(false)} onDone={refresh} />
+      <QuoteForm open={!!editing} initial={editing} onClose={() => setEditing(null)} onDone={refresh} />
       <ConvertModal quote={convert} onClose={() => setConvert(null)} onDone={refresh} />
+
+      <ConfirmDelete
+        open={!!deleting} onClose={() => setDeleting(null)} onDone={refresh}
+        title="Delete quote permanently"
+        action="quotes.delete" input={{ quoteId: deleting?.id }}
+        confirmText={deleting?.ref} confirmLabel="the quote reference">
+        Quote <strong>{deleting?.ref}</strong> for {deleting?.customer} and all its line
+        items are removed for good. This cannot be undone.
+        <br /><br />
+        A quote that has already been turned into a booking cannot be deleted \u2014 cancel
+        the booking instead.
+      </ConfirmDelete>
     </div>
   );
 }
 
-function QuoteForm({ open, onClose, onDone }: any) {
+/** Create when `initial` is absent, edit when it is there. */
+function QuoteForm({ open, onClose, onDone, initial }: any) {
   const t = useT();
   const [customers, setCustomers] = useState<any[]>([]);
   const [services, setServices] = useState<any[]>([]);
@@ -84,6 +120,23 @@ function QuoteForm({ open, onClose, onDone }: any) {
     callAction("services.list", {}).then(setServices).catch(() => {});
   }, [open]);
 
+  // Seed from the record being edited, and clear when reused for a new quote.
+  useEffect(() => {
+    if (!open) return;
+    if (initial) {
+      setCustomerId(initial.customerId ?? "");
+      setItems(initial.items?.length
+        ? initial.items.map((i: any) => ({ name: i.name, qty: i.qty, price: (i.priceCents / 100).toFixed(2), serviceId: i.serviceId ?? undefined }))
+        : [{ name: "", qty: 1, price: "" }]);
+      setDiscount(initial.discountCents ? (initial.discountCents / 100).toFixed(2) : "");
+      setTax(String((initial.taxRateBp ?? 0) / 100));
+      setNotes(initial.notes ?? "");
+    } else {
+      setCustomerId(""); setItems([{ name: "", qty: 1, price: "" }]);
+      setDiscount(""); setTax("0"); setNotes("");
+    }
+  }, [open, initial]);
+
   const subtotal = items.reduce((a, i) => a + (Number(i.qty) || 0) * toCents(i.price || 0), 0);
   const afterDisc = Math.max(0, subtotal - toCents(discount || 0));
   const total = afterDisc + Math.round(afterDisc * (parseFloat(tax || "0") * 100) / 10000);
@@ -95,22 +148,31 @@ function QuoteForm({ open, onClose, onDone }: any) {
     const valid = items.filter((i) => i.name.trim() && i.price);
     if (!valid.length) return toast("Add at least one line item", "err");
     setBusy(true);
+    const lines = valid.map((i) => ({ name: i.name, qty: Number(i.qty) || 1, priceCents: toCents(i.price), serviceId: i.serviceId || undefined }));
     try {
-      await callAction("quotes.create", {
-        customerId, discountCents: toCents(discount || 0), taxRateBp: Math.round(parseFloat(tax || "0") * 100),
-        notes: notes || undefined,
-        items: valid.map((i) => ({ name: i.name, qty: Number(i.qty) || 1, priceCents: toCents(i.price), serviceId: i.serviceId || undefined })),
-      });
-      toast("Quote created"); onDone(); onClose();
-      setItems([{ name: "", qty: 1, price: "" }]); setCustomerId(""); setDiscount(""); setNotes("");
-    } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
+      if (initial) {
+        // The customer is fixed once a quote exists; quotes.update does not take one.
+        await callAction("quotes.update", {
+          quoteId: initial.id, items: lines, discountCents: toCents(discount || 0),
+          taxRateBp: Math.round(parseFloat(tax || "0") * 100), notes: notes || undefined,
+        });
+        toast("Quote updated");
+      } else {
+        await callAction("quotes.create", {
+          customerId, discountCents: toCents(discount || 0), taxRateBp: Math.round(parseFloat(tax || "0") * 100),
+          notes: notes || undefined, items: lines,
+        });
+        toast("Quote created");
+      }
+      onDone(); onClose();
+    } catch (e: any) { toast(humanError(e.message), "err"); } finally { setBusy(false); }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="New quote" wide>
+    <Modal open={open} onClose={onClose} title={initial ? `Edit quote ${initial.ref}` : "New quote"} wide>
       <div className="space-y-3">
         <Field label={t("common.customer")}>
-          <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+          <select className="input" value={customerId} onChange={(e) => setCustomerId(e.target.value)} disabled={!!initial}>
             <option value="">— select —</option>
             {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
@@ -152,7 +214,8 @@ function QuoteForm({ open, onClose, onDone }: any) {
         </div>
         <div className="flex justify-end gap-2">
           <button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
-          <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : t("common.create")}</button>
+          <button onClick={go} disabled={busy} className="btn-primary">
+            {busy ? t("common.saving") : initial ? t("common.save") : t("common.create")}</button>
         </div>
       </div>
     </Modal>
