@@ -4,6 +4,15 @@ import { supabaseServer, authConfigured } from "@/lib/supabase/server";
 import { audit } from "@/lib/audit";
 
 /**
+ * Run next to the database.
+ *
+ * The database lives in ap-southeast-1. Vercel's project default is iad1, which
+ * put every query on a round trip across the Pacific; vercel.json pins the same
+ * region, and this keeps it pinned even if that project setting is changed.
+ */
+export const preferredRegion = "sin1";
+
+/**
  * Sign in and out.
  *
  * Supabase Auth verifies the password; this route exists so the session

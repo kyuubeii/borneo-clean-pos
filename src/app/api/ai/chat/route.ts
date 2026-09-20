@@ -5,6 +5,15 @@ import { runAction, toolSchemas, getAction, resolveAction } from "@/lib/actions"
 import { aiConfig, chatCompletion, getSetting, type ORMessage } from "@/lib/openrouter";
 import { isoDate } from "@/lib/dates";
 
+/**
+ * Run next to the database.
+ *
+ * The database lives in ap-southeast-1. Vercel's project default is iad1, which
+ * put every query on a round trip across the Pacific; vercel.json pins the same
+ * region, and this keeps it pinned even if that project setting is changed.
+ */
+export const preferredRegion = "sin1";
+
 export const maxDuration = 60;
 
 const PENDING = JSON.stringify({ ok: false, error: "Awaiting user confirmation." });
@@ -66,6 +75,7 @@ export async function POST(req: NextRequest) {
   const business = await getSetting("business.name", "Borneo Clean Services");
 
   // Rebuild the conversation from stored history so follow-ups keep their context.
+
   const history = await db.chatMessage.findMany({ where: { threadId: thread }, orderBy: { createdAt: "asc" }, take: 60 });
   const messages: ORMessage[] = [{ role: "system", content: systemPrompt(user, business) }];
   for (const m of history) {

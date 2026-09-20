@@ -3,6 +3,15 @@ import { getUser } from "@/lib/auth";
 import { storage, storageConfigured, BUCKET } from "@/lib/storage";
 import crypto from "crypto";
 
+/**
+ * Run next to the database.
+ *
+ * The database lives in ap-southeast-1. Vercel's project default is iad1, which
+ * put every query on a round trip across the Pacific; vercel.json pins the same
+ * region, and this keeps it pinned even if that project setting is changed.
+ */
+export const preferredRegion = "sin1";
+
 /** Job photos and expense receipts, stored in Supabase Storage. */
 export async function POST(req: NextRequest) {
   const user = await getUser();
@@ -33,5 +42,6 @@ export async function POST(req: NextRequest) {
   }
 
   const { data } = storage!.from(BUCKET).getPublicUrl(name);
+
   return NextResponse.json({ ok: true, url: data.publicUrl });
 }

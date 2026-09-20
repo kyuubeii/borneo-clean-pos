@@ -209,7 +209,10 @@ was deliberately skipped (see below). Measured against the same live database:
 but **the function ran in `iad1` (US East)** while the database is in
 `ap-southeast-1`. Every query went Singapore → US East → Singapore.
 
-`vercel.json` now pins functions to `sin1`. This is almost certainly the single
+Pinned to `sin1` two ways, so neither alone is load-bearing:
+`vercel.json` sets the deployment default, and `export const preferredRegion =
+"sin1"` is set on every route handler and on both layouts, which survives a
+change to the project's region setting. This is almost certainly the single
 largest win, and it likely also collapses most of the 6x pooler overhead: the
 extra ~410 ms was roughly 4.5 × the 91 ms round trip, consistent with the pooler
 making several round trips per query — cheap once it is next to the database.
@@ -233,9 +236,12 @@ still building answers with `x-matched-path: /[[...slug]]` and returns
 `sin1::sin1::` from the placeholder regardless — check that `x-matched-path`
 reads `/api/actions/[name]` before trusting the region.
 
-If it still says `iad1`, escalate in this order: Project Settings → Functions →
-Function Region; then `export const preferredRegion = "sin1"` in the route
-handlers and the `(app)` layout.
+If it still says `iad1`, the remaining lever is Project Settings → Functions →
+Function Region, which is dashboard-only and cannot be set from the repo.
+
+Middleware is not pinned and cannot be: it runs on the edge network at whichever
+point of presence is nearest the visitor, which is what you want. It no longer
+touches the database or `/api`, so it costs nothing to have it far away.
 
 ### Server
 

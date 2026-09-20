@@ -4,6 +4,15 @@ import { nextRef } from "@/lib/ref";
 import { notify } from "@/lib/notify";
 import { audit } from "@/lib/audit";
 
+/**
+ * Run next to the database.
+ *
+ * The database lives in ap-southeast-1. Vercel's project default is iad1, which
+ * put every query on a round trip across the Pacific; vercel.json pins the same
+ * region, and this keeps it pinned even if that project setting is changed.
+ */
+export const preferredRegion = "sin1";
+
 /** Public booking request. Creates a PENDING booking for the office to confirm — never a confirmed job. */
 export async function GET() {
   const services = await db.service.findMany({ where: { active: true }, orderBy: [{ isAddon: "asc" }, { name: "asc" }] });

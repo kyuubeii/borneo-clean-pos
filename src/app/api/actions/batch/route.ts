@@ -3,6 +3,15 @@ import { z } from "zod";
 import { getUser } from "@/lib/auth";
 import { runAction, getAction } from "@/lib/actions";
 
+/**
+ * Run next to the database.
+ *
+ * The database lives in ap-southeast-1. Vercel's project default is iad1, which
+ * put every query on a round trip across the Pacific; vercel.json pins the same
+ * region, and this keeps it pinned even if that project setting is changed.
+ */
+export const preferredRegion = "sin1";
+
 const Body = z.object({
   calls: z.array(z.object({ name: z.string(), input: z.unknown().optional() })).min(1).max(25),
 });
