@@ -15,5 +15,6 @@ tsconfig.tsbuildinfo
 supabase/.temp
 .deploy-tmp
 .next-verify
+.next-verify2
 
 scripts/.tmp/
