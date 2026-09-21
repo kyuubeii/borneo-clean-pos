@@ -1,5 +1,7 @@
 # Deploying Borneo Clean
 
+Live at <https://borneoclean.vercel.app> (Vercel project `borneoclean`).
+
 Repository: <https://github.com/kyuubeii/borneo-clean-pos> (private — it contains
 real customer names, phone numbers and addresses in `scripts/customer-profiles.json`,
 so keep it that way).
@@ -93,30 +95,41 @@ duplicated, so a failed attempt does not leave an orphan holding the address.
 
 ---
 
-## Deploying from the CLI: the git-author block
+## Deploying
 
-`vercel deploy` attaches the local git commit metadata to the deployment. The
-Vercel account (`theborneoclean-spec`) is not linked to the GitHub identity
-that authors the commits (`kyuubeii` / oscarkhoz@gmail.com), and the project
-has `gitForkProtection` enabled, so Vercel refuses before it even builds:
+Both Vercel projects — `borneoclean` (live, borneoclean.vercel.app) and
+`borneo-clean-pos` (spare, same database) — are linked to
+`kyuubeii/borneo-clean-pos` with production branch `main` and automatic
+deployments enabled. Pushing to `main` deploys both:
+
+```bash
+git push origin main
+```
+
+The functions run in `sin1`, pinned by `vercel.json` and by `preferredRegion`
+on the route handlers, because the database is in ap-southeast-1 and Vercel's
+default `iad1` put every query across the Pacific.
+
+### If a deployment comes back BLOCKED
+
+`gitForkProtection` is on, and the CLI attaches the local git commit metadata.
+If the Vercel account is not linked to the GitHub identity that authored the
+commit, the deployment is refused before it builds:
 
     readyState: BLOCKED
     "The deployment was blocked because the commit author doesn't have
      permission to create deployments for this project."
     buildSkipped: true
 
-Nothing in the build is wrong when this happens -- `vercel ls` unhelpfully
-shows it as `UNKNOWN`, and only the API reports `BLOCKED` with a reason:
+`vercel ls` unhelpfully shows that as `UNKNOWN`. Only the API gives a reason:
 
 ```bash
-vercel inspect <deployment-url>   # shows UNKNOWN
-# the real answer:
 curl -s -H "Authorization: Bearer $TOKEN" \
   "https://api.vercel.com/v13/deployments/<id>?teamId=<team>" | jq .readyStateReason
 ```
 
-The workaround used here is to deploy from an export that is not inside the
-git working tree, so no commit metadata is attached:
+The fallback is to deploy from an export that is not inside the git working
+tree, so no commit metadata is attached:
 
 ```bash
 rm -rf /tmp/bc-deploy && mkdir -p /tmp/bc-deploy
@@ -126,12 +139,8 @@ mkdir -p /tmp/bc-deploy/.vercel && cp .vercel/project.json /tmp/bc-deploy/.verce
 cd /tmp/bc-deploy && vercel deploy --prod --yes
 ```
 
-Note the directory must be outside the repository -- a subdirectory of it does
-not work, because the CLI walks up the tree to find `.git`.
-
-The durable fix is to connect the GitHub account to Vercel so git-push deploys
-work normally. That needs the `kyuubeii` GitHub identity linked to the Vercel
-account, which is a browser flow.
+The directory has to be outside the repository — a subdirectory of it does not
+work, because the CLI walks up the tree looking for `.git`.
 
 ---
 
