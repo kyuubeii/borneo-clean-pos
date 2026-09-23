@@ -1,7 +1,19 @@
 import { db } from "./db";
-/** In-app notifications only — no email/SMS provider is configured in v1. */
+import { schedulePush } from "./push";
+
+/**
+ * In-app notifications, and a push copy to phones running the iPhone app.
+ * No email/SMS provider is configured in v1.
+ *
+ * The push is sent after the response, keyed on the new row's id, so a
+ * notification written inside a transaction that is later rolled back is
+ * never pushed.
+ */
 export async function notify(n: { userId?: string | null; type: string; title: string; body?: string; link?: string }, client: any = db) {
-  try { await client.notification.create({ data: { userId: n.userId ?? null, type: n.type, title: n.title, body: n.body, link: n.link } }); }
+  try {
+    const row = await client.notification.create({ data: { userId: n.userId ?? null, type: n.type, title: n.title, body: n.body, link: n.link } });
+    schedulePush(row.id);
+  }
   catch { /* never break the request */ }
 }
 
@@ -23,13 +35,18 @@ export function visibleTo(userId: string) {
   };
 }
 
+/** What the bell's badge counts: visible, not dismissed, not yet read. */
+export function unreadCount(userId: string) {
+  return db.notification.count({ where: { ...visibleTo(userId), AND: { NOT: { receipts: { some: { userId, read: true } } } } } });
+}
+
 export async function listNotifications(userId: string, take = 30) {
   const [rows, unread] = await Promise.all([
     db.notification.findMany({
       where: visibleTo(userId), orderBy: { createdAt: "desc" }, take,
       include: { receipts: { where: { userId }, select: { read: true } } },
     }),
-    db.notification.count({ where: { ...visibleTo(userId), AND: { NOT: { receipts: { some: { userId, read: true } } } } } }),
+    unreadCount(userId),
   ]);
   return {
     items: rows.map(({ receipts, ...n }) => ({ ...n, read: receipts[0]?.read ?? false })),

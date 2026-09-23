@@ -70,6 +70,15 @@ Set these environment variables **before** the first deploy:
 | `SUPABASE_SERVICE_ROLE_KEY` | the **rotated** key |
 | `SUPABASE_BUCKET` | `uploads` |
 | `OPENROUTER_API_KEY` | optional; the assistant is disabled without it |
+| `APNS_KEY_ID` | optional; push to the iPhone app. The 10-character Key ID of the APNs key |
+| `APNS_TEAM_ID` | the Apple developer Team ID, `NJ99DBJWF9` |
+| `APNS_KEY` | the whole `.p8` file, including the BEGIN/END lines |
+| `APNS_BUNDLE_ID` | optional; defaults to `com.borneoclean.app` |
+
+Push is silent until all three APNs values are set: notifications still go to
+the bell exactly as before, and nothing is sent to Apple. The `.p8` key goes
+straight into Vercel -- never into chat, the repository or a `.env` file that
+leaves this machine.
 
 ### Accounts
 

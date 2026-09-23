@@ -31,6 +31,7 @@ model User {
   notifications Notification[]
   notificationReceipts NotificationReceipt[]
   chatThreads ChatThread[]
+  pushDevices PushDevice[]
 }
 
 model Staff {
@@ -399,6 +400,27 @@ model NotificationReceipt {
   dismissed      Boolean      @default(false)
   @@id([userId, notificationId])
   @@index([notificationId])
+}
+
+/**
+ * A phone signed in to the iPhone app, for push notifications.
+ *
+ * Push is a second copy of what the bell already shows: `types` only chooses
+ * which notification types also pop up on this phone. The bell itself, and
+ * the Notification rows behind it, are unchanged. One row per APNs token; a
+ * phone that signs in as someone else moves to them.
+ */
+model PushDevice {
+  id          String   @id @default(cuid())
+  token       String   @unique
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  platform    String   @default("ios")
+  environment String   @default("production") // sandbox | production (APNs host)
+  types       String   @default("")           // comma-separated notification types to push
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([userId])
 }
 
 model AuditLog {

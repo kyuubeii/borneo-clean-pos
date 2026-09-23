@@ -3,6 +3,7 @@ import { db } from "../db";
 import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { createAuthUser, deleteAuthUser } from "../supabase/admin";
+import { schedulePush } from "../push";
 
 defineAction({
   name: "settings.get",
@@ -103,5 +104,9 @@ defineAction({
   description: "Create an in-app notification, for example a reminder for the team.",
   category: "Notifications", roles: ["OWNER", "ADMIN"],
   input: z.object({ type: z.string().default("REMINDER"), title: z.string(), body: z.string().optional(), link: z.string().optional() }),
-  handler: async (i) => db.notification.create({ data: i }),
+  handler: async (i) => {
+    const row = await db.notification.create({ data: i });
+    schedulePush(row.id);
+    return row;
+  },
 });
