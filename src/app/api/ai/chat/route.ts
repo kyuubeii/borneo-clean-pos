@@ -4,6 +4,7 @@ import { getUser } from "@/lib/auth";
 import { runAction, toolSchemas, getAction, resolveAction } from "@/lib/actions";
 import { aiConfig, chatCompletion, getSetting, type ORMessage } from "@/lib/openrouter";
 import { isoDate } from "@/lib/dates";
+import { PENDING, CONTEXT_MESSAGES, contextWindow, titleFrom } from "@/lib/chat";
 
 /**
  * Run next to the database.
@@ -15,8 +16,6 @@ import { isoDate } from "@/lib/dates";
 export const preferredRegion = "sin1";
 
 export const maxDuration = 60;
-
-const PENDING = JSON.stringify({ ok: false, error: "Awaiting user confirmation." });
 
 /** Fill in a placeholder tool message, in the DB and in the in-flight message list. */
 async function resolveToolMessage(threadId: string, toolCallId: string | undefined, payload: string, messages: ORMessage[]) {
@@ -66,17 +65,38 @@ export async function POST(req: NextRequest) {
   if (!user) return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
 
   const { threadId, message, confirm } = await req.json();
-  const thread: string = threadId || `t_${Date.now()}`;
+
+  // A conversation belongs to the person who started it. This is checked before
+  // anything else, including the confirm path, which executes an action.
+  if (threadId) {
+    const owned = await db.chatThread.findUnique({ where: { id: threadId }, select: { userId: true } });
+    if (!owned || owned.userId !== user.id) return NextResponse.json({ ok: false, error: "That conversation no longer exists." }, { status: 404 });
+  } else if (!message) {
+    return NextResponse.json({ ok: false, error: "Nothing to send." }, { status: 400 });
+  }
+
   const { key, model, configured } = await aiConfig();
   if (!configured) {
     return NextResponse.json({ ok: false, error: "NO_API_KEY",
       message: "No OpenRouter API key is configured. Add one under Settings → AI Assistant." }, { status: 400 });
   }
+
+  const thread: string = threadId || `t_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  let title: string | undefined;
+  if (!threadId) {
+    title = titleFrom(message);
+    await db.chatThread.create({ data: { id: thread, userId: user.id, title } });
+  } else {
+    // Most recently used first in the history list.
+    await db.chatThread.update({ where: { id: thread }, data: { updatedAt: new Date() } });
+  }
   const business = await getSetting("business.name", "Borneo Clean Services");
 
   // Rebuild the conversation from stored history so follow-ups keep their context.
-
-  const history = await db.chatMessage.findMany({ where: { threadId: thread }, orderBy: { createdAt: "asc" }, take: 60 });
+  // The newest messages, not the oldest: a long thread used to replay its first
+  // sixty and silently lose everything said since.
+  const latest = await db.chatMessage.findMany({ where: { threadId: thread }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: CONTEXT_MESSAGES });
+  const history = contextWindow(latest.reverse());
   const messages: ORMessage[] = [{ role: "system", content: systemPrompt(user, business) }];
   for (const m of history) {
     if (m.role === "tool") messages.push({ role: "tool", content: m.content, tool_call_id: m.toolCalls ?? undefined });
@@ -111,7 +131,7 @@ export async function POST(req: NextRequest) {
       if (!reply.tool_calls?.length) {
         const text = reply.content ?? "";
         await db.chatMessage.create({ data: { threadId: thread, role: "assistant", content: text } });
-        return NextResponse.json({ ok: true, threadId: thread, message: text, events });
+        return NextResponse.json({ ok: true, threadId: thread, title, message: text, events });
       }
 
       messages.push(reply);
@@ -140,7 +160,7 @@ export async function POST(req: NextRequest) {
         // History stays valid (that is what the placeholders are for); the model simply
         // sees "awaiting confirmation" for calls that never ran, which is accurate.
         if (!res.ok && (res as any).needsConfirm) {
-          return NextResponse.json({ ok: true, threadId: thread, message: reply.content ?? "",
+          return NextResponse.json({ ok: true, threadId: thread, title, message: reply.content ?? "",
             events,
             confirm: {
               action: actionName, input: (res as any).input, toolCallId: call.id,
@@ -156,17 +176,9 @@ export async function POST(req: NextRequest) {
         events.push({ type: "action", name: actionName, ok: res.ok, readOnly: def?.readOnly ?? false });
       }
     }
-    return NextResponse.json({ ok: true, threadId: thread, events,
+    return NextResponse.json({ ok: true, threadId: thread, title, events,
       message: "That needed more steps than I can take in one go. Could you narrow the request a little?" });
   } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "Assistant error" }, { status: 500 });
+    return NextResponse.json({ ok: false, threadId: thread, title, error: e?.message ?? "Assistant error" }, { status: 500 });
   }
-}
-
-export async function DELETE(req: NextRequest) {
-  const user = await getUser();
-  if (!user) return NextResponse.json({ ok: false }, { status: 401 });
-  const { threadId } = await req.json();
-  if (threadId) await db.chatMessage.deleteMany({ where: { threadId } });
-  return NextResponse.json({ ok: true });
 }

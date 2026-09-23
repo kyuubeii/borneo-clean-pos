@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/auth";
+import { listNotifications, setReceipts } from "@/lib/notify";
 
 /**
  * Run next to the database.
@@ -13,17 +13,23 @@ export const preferredRegion = "sin1";
 
 export async function GET() {
   const user = await getUser();
-  if (!user) return NextResponse.json({ items: [] });
-  const items = await db.notification.findMany({
-    where: { OR: [{ userId: null }, { userId: user.id }] },
-    orderBy: { createdAt: "desc" }, take: 20,
-  });
-  return NextResponse.json({ items });
+  if (!user) return NextResponse.json({ items: [], unread: 0 });
+  return NextResponse.json(await listNotifications(user.id));
 }
 
-export async function POST() {
+/**
+ * The bell's own read/dismiss calls. These go here rather than through the
+ * action registry so that opening the bell does not write an audit-log row
+ * every time; the assistant has notifications.markRead / .dismiss for the same.
+ *
+ * Body: { op: "read" | "dismiss", id?: string } -- no id means all of them.
+ */
+export async function POST(req: NextRequest) {
   const user = await getUser();
   if (!user) return NextResponse.json({ ok: false }, { status: 401 });
-  await db.notification.updateMany({ where: { OR: [{ userId: null }, { userId: user.id }] }, data: { read: true } });
-  return NextResponse.json({ ok: true });
+  const body = await req.json().catch(() => ({}));
+  const op = body?.op === "dismiss" ? "dismiss" : "read";
+  const id = typeof body?.id === "string" && body.id ? body.id : undefined;
+  const count = await setReceipts(user.id, op === "dismiss" ? { dismissed: true } : { read: true }, id);
+  return NextResponse.json({ ok: true, count });
 }

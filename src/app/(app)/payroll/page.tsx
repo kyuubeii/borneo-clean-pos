@@ -67,6 +67,7 @@ export default function Payroll() {
                       {l.payType === "HOURLY" ? <><Money cents={l.payRate} />/hr</>
                         : l.payType === "PER_JOB" ? <><Money cents={l.payRate} />/job</>
                         : `${l.payRate / 100}% of job value`}
+                      {l.fixedJobs > 0 && <span className="block text-[11px] text-ink-400">{l.fixedJobs} job{l.fixedJobs > 1 ? "s" : ""} at a set amount</span>}
                     </td>
                     <td className="td text-right tabular-nums">{l.hours}</td>
                     <td className="td text-right tabular-nums">{l.jobsCompleted}</td>

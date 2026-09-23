@@ -59,6 +59,26 @@ export async function assertAvailable(client: any, ids: string[], start: Date, d
   }
 }
 
+/**
+ * Make a job's team exactly `staffIds`, the first being the lead.
+ *
+ * Diffs against the current team rather than deleting and recreating it: an
+ * assignment carries the labour amount set on the job's costing, so rebuilding
+ * the list on every save or calendar drag would quietly erase what the cleaner
+ * is owed. Returns the staff ids that were newly added.
+ */
+export async function setJobTeam(client: any, jobId: string, staffIds: string[]): Promise<string[]> {
+  const current: { id: string; staffId: string; isLead: boolean }[] = await client.jobAssignment.findMany({ where: { jobId } });
+  await client.jobAssignment.deleteMany({ where: { jobId, staffId: { notIn: staffIds } } });
+  const added: string[] = [];
+  for (const [n, staffId] of staffIds.entries()) {
+    const existing = current.find((c) => c.staffId === staffId);
+    if (!existing) { await client.jobAssignment.create({ data: { jobId, staffId, isLead: n === 0 } }); added.push(staffId); }
+    else if (existing.isLead !== (n === 0)) await client.jobAssignment.update({ where: { id: existing.id }, data: { isLead: n === 0 } });
+  }
+  return added;
+}
+
 /** Both entry points share completion, cancellation and reopening behavior. */
 export async function setJobStatus(client: any, jobId: string, status: string, bookingStatus?: string) {
   const job = await client.job.findUnique({ where: { id: jobId }, include: { assignments: true } });

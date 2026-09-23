@@ -113,6 +113,11 @@ Things it can do:
 - *"Record RM120 petrol expense for today."*
 - *"Find customers who haven't booked in the last 3 months."*
 
+**History.** Every conversation is kept (`ChatThread`, one per conversation, owned by
+the person who started it) and listed in the panel's sidebar like a chat app — grouped by
+date, searchable by title or message text, renamable and deletable. Reopening the
+assistant resumes the last conversation.
+
 **Thread integrity.** Every `tool_call` the model emits gets a matching tool message
 written immediately, then resolved as the call completes. This holds whether the turn
 ends normally, hits the confirmation gate, errors, or the user cancels — so a thread can
@@ -141,15 +146,21 @@ visible under **Activity log**.
   offers an explicit "whole series" option.
 - **Revenue is recognised from payments received**, not invoices raised — so the
   dashboard and reports show cash actually collected.
-- **Job costing** derives labour from tracked check-in/check-out time against each
-  cleaner's pay basis (hourly / per-job / percentage), then adds materials and any
-  job-linked expenses.
+- **Job costing** is edited in one place (Job → Job costing → Edit): the amount each
+  cleaner is paid for the job, materials, and the expenses booked against it. A labour
+  amount set on the job wins; otherwise it comes from the cleaner's pay basis (hourly on
+  tracked or scheduled time / per-job / percentage). `labourFor()` in `src/lib/labour.ts`
+  is the only place that sums this up — job costing, payroll and the P&L all call it, so
+  what a job shows is what payroll pays and what the reports deduct. Job expenses are
+  ordinary `Expense` rows, so they also appear under Expenses and reimbursements.
 
 ## Scoped out of v1 (deliberate)
 
 - **Notifications are in-app only** (bell menu + `Notification` table). No email or SMS
   provider is wired up, since no credentials exist for one. The Settings toggles control
-  which in-app notifications are generated.
+  which in-app notifications are generated. Read and dismissed state is per person
+  (`NotificationReceipt`); opening the bell clears the badge, and the bell only looks back
+  30 days.
 - **Invoice PDF is the print stylesheet** — the invoice route is print-styled, so
   "Print → Save as PDF" produces a clean document. No PDF library in v1.
 - **Uploads go to local disk** under `public/uploads`, with rows in the DB. No object storage.

@@ -32,7 +32,7 @@ async function main() {
 
   // Order matters: children before parents, so foreign keys never block a delete.
   const ORDER = [
-    "chatMessage", "auditLog", "notification", "capitalEntry", "payout", "expense", "payment",
+    "chatMessage", "chatThread", "auditLog", "notificationReceipt", "notification", "capitalEntry", "payout", "expense", "payment",
     "invoiceItem", "invoice", "quoteItem", "quote", "timeEntry", "photo",
     "checklistItem", "jobAssignment", "job", "bookingItem", "booking",
     "address", "customer", "availability", "staff",

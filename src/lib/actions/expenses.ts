@@ -4,6 +4,7 @@ import { optionalId, optionalText } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { nextRef } from "../ref";
 import { startOfDay, endOfDay } from "../dates";
+import { labourFor } from "../labour";
 
 defineAction({
   name: "expenses.list",
@@ -130,7 +131,7 @@ defineAction({
 
 defineAction({
   name: "payroll.calculate",
-  description: "Calculate what each cleaner has earned over a period, from tracked time and their pay setup. Does not create a payout.",
+  description: "Calculate what each cleaner has earned over a period: for each completed job, the labour amount set on the job, otherwise their pay rate (hourly on tracked or scheduled time, per job, or a share of the job). Plus unpaid reimbursements. Does not create a payout.",
   category: "Payroll", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ from: z.string().describe("ISO date"), to: z.string().describe("ISO date"), staffId: optionalId() }),
   handler: async ({ from, to, staffId }) => {
@@ -138,18 +139,22 @@ defineAction({
     const staff = await db.staff.findMany({ where: { active: true, ...(staffId ? { id: staffId } : {}) } });
     const out = [];
     for (const s of staff) {
-      const entries = await db.timeEntry.findMany({ where: { staffId: s.id, startAt: { gte, lte }, endAt: { not: null } } });
-      const minutes = entries.reduce((a, e) => a + (e.endAt!.getTime() - e.startAt.getTime()) / 60000, 0);
-      const jobs = await db.job.findMany({ where: { assignments: { some: { staffId: s.id } }, status: "COMPLETED", scheduledAt: { gte, lte } } });
+      // Pay is worked out job by job with the same labourFor() the job's costing
+      // uses, so an amount set by hand on a job is exactly what gets paid here.
+      const jobs = await db.job.findMany({
+        where: { assignments: { some: { staffId: s.id } }, status: "COMPLETED", scheduledAt: { gte, lte } },
+        include: { assignments: { where: { staffId: s.id }, include: { staff: true } }, timeEntries: { where: { staffId: s.id } } },
+      });
+      const lines = jobs.map((j) => labourFor(j, j.assignments[0], j.timeEntries));
+      const minutes = lines.reduce((a, l) => a + l.minutes, 0);
       const revenue = jobs.reduce((a, j) => a + j.revenueCents, 0);
-      const earned = s.payType === "HOURLY" ? Math.round((minutes / 60) * s.payRate)
-        : s.payType === "PER_JOB" ? jobs.length * s.payRate
-        : Math.round((revenue * s.payRate) / 10000);
+      const earned = lines.reduce((a, l) => a + l.costCents, 0);
+      const fixedJobs = lines.filter((l) => l.fixed).length;
       const reimbursements = await db.expense.aggregate({ _sum: { amountCents: true },
         where: { staffId: s.id, reimbursable: true, reimbursed: false, spentAt: { gte, lte } } });
       out.push({ staffId: s.id, name: s.name, payType: s.payType, payRate: s.payRate,
         hours: +(minutes / 60).toFixed(2), jobsCompleted: jobs.length, jobRevenueCents: revenue,
-        earnedCents: earned, reimbursementsCents: reimbursements._sum.amountCents ?? 0,
+        earnedCents: earned, fixedJobs, reimbursementsCents: reimbursements._sum.amountCents ?? 0,
         totalCents: earned + (reimbursements._sum.amountCents ?? 0) });
     }
     return { from: gte, to: lte, lines: out, grandTotalCents: out.reduce((a, o) => a + o.totalCents, 0) };

@@ -4,6 +4,7 @@ import { optionalId } from "../schema";
 import { defineAction } from "../registry";
 import { startOfDay, endOfDay, startOfMonth, endOfMonth, addDays, isoDate } from "../dates";
 import { invoiceTotals } from "./finance";
+import { jobLabour } from "../labour";
 
 function range(from?: string, to?: string) {
   const gte = from ? startOfDay(new Date(from)) : startOfMonth(new Date());
@@ -23,7 +24,7 @@ async function revenueIn(gte: Date, lte: Date) {
 
 defineAction({
   name: "reports.summary",
-  description: "Headline business figures for a period: sales earned, cash collected, expenses, labour cost, profit, margin, job counts and new customers. Profit is sales minus costs (accrual); revenueCollectedCents is cash actually received. Use for 'how much did we make this month'.",
+  description: "Headline business figures for a period: sales earned, cash collected, expenses, labour cost, materials, profit, margin, job counts and new customers. Profit is sales minus costs (accrual); revenueCollectedCents is cash actually received. Use for 'how much did we make this month'.",
   category: "Reports", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ from: z.string().optional().describe("ISO date; defaults to start of this month"), to: z.string().optional() }),
   handler: async ({ from, to }) => {
@@ -39,28 +40,24 @@ defineAction({
     ]);
     const invoiced = invoices.reduce((a, i) => a + invoiceTotals(i).total, 0);
 
-    let labour = 0;
-    for (const j of jobs.filter((x) => x.status === "COMPLETED")) {
-      for (const a of j.assignments) {
-        const mins = j.timeEntries.filter((t) => t.staffId === a.staffId && t.endAt)
-          .reduce((x, t) => x + (t.endAt!.getTime() - t.startAt.getTime()) / 60000, 0) || j.durationMin;
-        labour += a.staff.payType === "HOURLY" ? Math.round((mins / 60) * a.staff.payRate)
-          : a.staff.payType === "PER_JOB" ? a.staff.payRate
-          : Math.round((j.revenueCents * a.staff.payRate) / 10000);
-      }
-    }
+    // Costs of work actually done: the same labour figure the job page and payroll
+    // use, and the materials the job used up. Materials used to be left out here,
+    // so the P&L showed more profit than the jobs themselves added up to.
+    const done = jobs.filter((x) => x.status === "COMPLETED");
+    const labour = done.reduce((a, j) => a + jobLabour(j), 0);
+    const materialCents = done.reduce((a, j) => a + j.materialCostCents, 0);
     const expenseCents = expenses._sum.amountCents ?? 0;
     // Sales earned in the period, whether or not the money has come in yet.
     // Profit must compare like with like: expenses are recorded on the date they are
     // incurred, so revenue has to be sales earned, not cash collected. Mixing the two
     // (cash in vs accrued costs) understates profit whenever customers pay late.
     const salesCents = jobs.filter((j) => j.status !== "CANCELLED").reduce((a, j) => a + j.revenueCents, 0);
-    const profit = salesCents - expenseCents - labour;
+    const profit = salesCents - expenseCents - labour - materialCents;
     return {
       from: gte, to: lte,
       salesCents, revenueCollectedCents: revenue, invoicedCents: invoiced,
       outstandingCents: Math.max(0, salesCents - revenue),
-      expenseCents, labourCents: labour, profitCents: profit,
+      expenseCents, labourCents: labour, materialCents, totalCostCents: expenseCents + labour + materialCents, profitCents: profit,
       marginPct: salesCents > 0 ? +((profit / salesCents) * 100).toFixed(1) : 0,
       jobsScheduled: jobs.length, jobsCompleted: jobs.filter((j) => j.status === "COMPLETED").length,
       jobsCancelled: jobs.filter((j) => j.status === "CANCELLED").length,
@@ -243,7 +240,12 @@ defineAction({
     const minutes = entries.reduce((a, e) => a + (e.endAt ? (e.endAt.getTime() - e.startAt.getTime()) / 60000 : 0), 0);
     const open = entries.find((e) => !e.endAt);
     const staff = await db.staff.findUnique({ where: { id } });
-    const earned = staff?.payType === "HOURLY" ? Math.round((minutes / 60) * staff.payRate) : 0;
+    // The same per-job figure payroll pays, so a cleaner sees what they will get.
+    const weekJobs = await db.job.findMany({
+      where: { status: "COMPLETED", scheduledAt: { gte: weekStart, lte }, assignments: { some: { staffId: id } } },
+      include: { assignments: { where: { staffId: id }, include: { staff: true } }, timeEntries: { where: { staffId: id } } },
+    });
+    const earned = weekJobs.reduce((a, j) => a + jobLabour(j), 0);
     const upcoming = await db.job.count({ where: { assignments: { some: { staffId: id } }, scheduledAt: { gt: lte }, status: { notIn: ["CANCELLED", "COMPLETED"] } } });
     return {
       date: gte, staffName: staff?.name,

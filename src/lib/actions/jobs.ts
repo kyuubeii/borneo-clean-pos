@@ -1,7 +1,9 @@
-import { assertAvailable, scheduleWrite, setJobStatus } from "../scheduling";
+import { assertAvailable, scheduleWrite, setJobStatus, setJobTeam } from "../scheduling";
+import { labourFor } from "../labour";
+import { nextRef } from "../ref";
 import { z } from "zod";
 import { db } from "../db";
-import { optionalId } from "../schema";
+import { optionalId, optionalText, nullableId, clearableText } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { startOfDay, endOfDay } from "../dates";
 import { notify } from "../notify";
@@ -93,22 +95,25 @@ defineAction({
     const j = await db.job.findUnique({ where: { id: jobId } });
     if (!j) throw new ActionError("Job not found");
     await assertAvailable(db, staffIds, j.scheduledAt, j.durationMin, jobId);
-    await db.jobAssignment.deleteMany({ where: { jobId } });
-    if (staffIds.length) await db.jobAssignment.createMany({ data: staffIds.map((s, n) => ({ jobId, staffId: s, isLead: n === 0 })) });
+    const added = await setJobTeam(db, jobId, staffIds);
     const staff = await db.staff.findMany({ where: { id: { in: staffIds } } });
-    for (const s of staff) await notify({ type: "STAFF", title: `Assigned to job ${j.ref}`, body: s.name, link: `/jobs/${jobId}` }, db);
+    // Only people who are new to the job. Re-saving an unchanged team used to
+    // announce everyone on it again, which is how the bell filled up.
+    for (const s of staff.filter((x: any) => added.includes(x.id))) await notify({ type: "STAFF", title: `Assigned to job ${j.ref}`, body: s.name, link: `/jobs/${jobId}` }, db);
     return { jobRef: j.ref, assigned: staff.map((s: any) => s.name) };
   }),
 });
 
 defineAction({
   name: "jobs.update",
-  description: "Update a job's instructions, internal notes, staff notes or material cost.",
+  description: "Update a job's instructions, internal notes, staff notes, duration or material cost. For labour or job expenses use jobs.updateCosting.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), customerInstructions: z.string().optional(),
     internalNotes: z.string().optional(), staffNotes: z.string().optional(),
     materialCostCents: z.number().int().min(0).optional(), durationMin: z.number().int().min(15).optional() }),
-  handler: async ({ jobId, ...data }) => scheduleWrite(async (db) => {
+  handler: async ({ jobId, ...data }, ctx) => scheduleWrite(async (db) => {
+    // Costing is money, and cleaners do not see job costing at all.
+    if (ctx.user.role === "STAFF" && data.materialCostCents !== undefined) throw new ActionError("Only an owner or admin can change a job's costs.");
     const job = await db.job.findUnique({ where: { id: jobId }, include: { assignments: true } });
     if (!job) throw new ActionError("Job not found");
     if (data.durationMin !== undefined && data.durationMin !== job.durationMin) {
@@ -163,54 +168,133 @@ defineAction({
 
 defineAction({
   name: "jobs.costing",
-  description: "Full job costing: revenue, labour cost from tracked time and pay rates, material cost, other expenses, profit and margin.",
+  description: "Full job costing: revenue, labour per cleaner (a fixed amount set on the job, otherwise from their pay rate), material cost, the expenses linked to the job, profit and margin.",
   category: "Job Costing", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ jobId: z.string() }),
   handler: async ({ jobId }) => {
     const j = await db.job.findUnique({ where: { id: jobId }, include: {
-      customer: true, timeEntries: { include: { staff: true } },
-      assignments: { include: { staff: true } }, expenses: true,
+      customer: true, timeEntries: true,
+      assignments: { include: { staff: true }, orderBy: { isLead: "desc" } },
+      expenses: { include: { category: true, staff: true }, orderBy: { spentAt: "asc" } },
     } });
     if (!j) throw new ActionError("Job not found");
-    let labour = 0;
-    let anyEstimated = false;
-    const breakdown: { staff: string; minutes: number; costCents: number; payType: string; estimated: boolean; noRate: boolean }[] = [];
-    for (const a of j.assignments) {
-      const tracked = j.timeEntries.filter((t) => t.staffId === a.staffId)
-        .reduce((x, t) => x + (t.endAt ? (t.endAt.getTime() - t.startAt.getTime()) / 60000 : 0), 0);
-      // A check-in closed seconds after it was opened is a mis-tap, not work.
-      // Anything under a minute is treated as untracked, so a completed job
-      // falls back to its scheduled duration instead of costing a stray cent.
-      const useTracked = tracked >= 1;
-      const estimated = !useTracked && j.status === "COMPLETED";
-      const mins = useTracked ? tracked : estimated ? j.durationMin : 0;
-      const c = a.staff.payType === "HOURLY" ? Math.round((mins / 60) * a.staff.payRate)
-        : a.staff.payType === "PER_JOB" ? a.staff.payRate
-        : Math.round((j.revenueCents * a.staff.payRate) / 10000);
-      labour += c;
-      if (estimated && a.staff.payType === "HOURLY") anyEstimated = true;
-      breakdown.push({
-        staff: a.staff.name, minutes: Math.round(mins), costCents: c,
-        payType: a.staff.payType,
-        estimated: estimated && a.staff.payType === "HOURLY",
-        // A cleaner on a zero pay rate contributes nothing to labour, which
-        // looks like a costing fault but is an unset rate on the staff record.
-        noRate: a.staff.payRate === 0,
-      });
-    }
+    const breakdown = j.assignments.map((a) => {
+      const line = labourFor(j, a, j.timeEntries);
+      return {
+        staffId: a.staffId, staff: a.staff.name, payType: a.staff.payType, payRate: a.staff.payRate,
+        minutes: line.minutes, costCents: line.costCents, fixed: line.fixed,
+        // What the pay rate alone would give, so the editor can show it as the default.
+        calculatedCents: labourFor(j, { ...a, labourCents: null }, j.timeEntries).costCents,
+        estimated: line.estimated, noRate: line.noRate,
+      };
+    });
+    const labour = breakdown.reduce((x, b) => x + b.costCents, 0);
     const other = j.expenses.reduce((a, e) => a + e.amountCents, 0);
     const cost = labour + j.materialCostCents + other;
     const profit = j.revenueCents - cost;
     return {
-      jobRef: j.ref, customer: j.customer.name, status: j.status,
+      jobRef: j.ref, customer: j.customer.name, status: j.status, scheduledAt: j.scheduledAt,
       revenueCents: j.revenueCents, labourCents: labour, materialCents: j.materialCostCents,
       otherExpenseCents: other, totalCostCents: cost, profitCents: profit,
       marginPct: j.revenueCents > 0 ? +((profit / j.revenueCents) * 100).toFixed(1) : 0,
       labourBreakdown: breakdown,
-      labourEstimated: anyEstimated,
+      labourEstimated: breakdown.some((b) => b.estimated),
       staffWithoutRate: breakdown.filter((b) => b.noRate).map((b) => b.staff),
+      expenses: j.expenses.map((e) => ({
+        id: e.id, ref: e.ref, amountCents: e.amountCents, spentAt: e.spentAt,
+        category: e.category?.name ?? null, vendor: e.vendor, note: e.note,
+        staffId: e.staffId, staff: e.staff?.name ?? null,
+        reimbursable: e.reimbursable, reimbursed: e.reimbursed,
+      })),
     };
   },
+});
+
+const costExpense = z.object({
+  amountCents: z.number().int().min(1).describe("Amount in cents"),
+  categoryName: optionalText().describe("e.g. Supplies, Fuel, Transport, Labour; created if new"),
+  vendor: clearableText(), note: clearableText(),
+  spentAt: z.string().optional().describe("ISO date; defaults to the job's date"),
+  staffId: nullableId().describe("Cleaner who paid out of their own pocket. Null when it came out of business cash."),
+  reimbursable: z.boolean().optional().describe("Owed back to that cleaner; defaults to true when a cleaner paid"),
+});
+
+defineAction({
+  name: "jobs.updateCosting",
+  description: "Edit a job's costing in one go: the labour amount paid to each cleaner for this job, the materials cost, and the expenses linked to the job (add, change or remove). Labour amounts flow into payroll and reports; the expenses appear in Expenses. A cleaner given a labour amount who is not yet on the job is added to it. Use labourCents null to go back to the cleaner's pay rate.",
+  category: "Job Costing", roles: ["OWNER", "ADMIN"],
+  input: z.object({
+    jobId: z.string(),
+    materialCostCents: z.number().int().min(0).optional(),
+    labour: z.array(z.object({
+      staffId: z.string(),
+      labourCents: z.number().int().min(0).nullable().describe("What this cleaner is paid for this job, in cents. Null = use their pay rate."),
+    })).optional(),
+    addExpenses: z.array(costExpense).optional(),
+    updateExpenses: z.array(costExpense.partial().extend({ expenseId: z.string() })).optional(),
+    removeExpenseIds: z.array(z.string()).optional(),
+  }),
+  handler: async ({ jobId, materialCostCents, labour, addExpenses, updateExpenses, removeExpenseIds }) => scheduleWrite(async (db) => {
+    const j = await db.job.findUnique({ where: { id: jobId }, include: { assignments: true, expenses: true } });
+    if (!j) throw new ActionError("Job not found");
+
+    if (labour?.length) {
+      const ids = labour.map((l) => l.staffId);
+      if (new Set(ids).size !== ids.length) throw new ActionError("Each cleaner can only have one labour amount on a job.");
+      const newcomers = ids.filter((id) => !j.assignments.some((a: any) => a.staffId === id));
+      if (newcomers.length) {
+        const found = await db.staff.count({ where: { id: { in: newcomers } } });
+        if (found !== newcomers.length) throw new ActionError("One of those cleaners no longer exists. Refresh and try again.");
+        // A finished job is history: paying someone for it must not depend on
+        // whether they happen to be free at that time now.
+        if (!["COMPLETED", "CANCELLED"].includes(j.status)) await assertAvailable(db, newcomers, j.scheduledAt, j.durationMin, jobId);
+      }
+      let hasLead = j.assignments.length > 0;
+      for (const l of labour) {
+        const existing = j.assignments.find((a: any) => a.staffId === l.staffId);
+        if (existing) await db.jobAssignment.update({ where: { id: existing.id }, data: { labourCents: l.labourCents } });
+        else {
+          await db.jobAssignment.create({ data: { jobId, staffId: l.staffId, isLead: !hasLead, labourCents: l.labourCents } });
+          hasLead = true;
+        }
+      }
+    }
+
+    if (materialCostCents !== undefined) await db.job.update({ where: { id: jobId }, data: { materialCostCents } });
+
+    // The editor only ever touches this job's own expenses.
+    const mine = (id: string) => {
+      const e = j.expenses.find((x: any) => x.id === id);
+      if (!e) throw new ActionError("That expense is not linked to this job. Refresh and try again.");
+      return e;
+    };
+    const categoryId = async (name?: string | null) => name
+      ? (await db.expenseCategory.upsert({ where: { name }, update: {}, create: { name } })).id : undefined;
+
+    for (const id of removeExpenseIds ?? []) { mine(id); await db.expense.delete({ where: { id } }); }
+    for (const { expenseId, categoryName, spentAt, staffId, ...rest } of updateExpenses ?? []) {
+      const e = mine(expenseId);
+      const cat = await categoryId(categoryName);
+      // Same rule as expenses.update: a reimbursed tick recorded a repayment to
+      // one person and cannot follow the row to someone else.
+      const movedPayer = staffId !== undefined && staffId !== e.staffId;
+      await db.expense.update({ where: { id: expenseId }, data: {
+        ...rest, ...(cat ? { categoryId: cat } : {}),
+        ...(spentAt ? { spentAt: new Date(spentAt) } : {}),
+        ...(staffId === undefined ? {} : { staffId, reimbursable: rest.reimbursable ?? !!staffId }),
+        ...(movedPayer ? { reimbursed: false } : {}),
+      } });
+    }
+    for (const x of addExpenses ?? []) {
+      await db.expense.create({ data: {
+        ref: await nextRef("EXP", "expense", db), jobId, amountCents: x.amountCents,
+        categoryId: await categoryId(x.categoryName), vendor: x.vendor ?? null, note: x.note ?? null,
+        spentAt: x.spentAt ? new Date(x.spentAt) : j.scheduledAt,
+        staffId: x.staffId ?? null, reimbursable: x.reimbursable ?? !!x.staffId,
+      } });
+    }
+    return { jobRef: j.ref, saved: true };
+  }),
 });
 
 // Calendar move updates the date and full team as one operation.
@@ -224,8 +308,7 @@ defineAction({
     if (["COMPLETED", "CANCELLED"].includes(j.status)) throw new ActionError("Reopen this job before moving it.");
     const when = new Date(scheduledAt);
     await assertAvailable(db, staffIds, when, j.durationMin, jobId);
-    await db.jobAssignment.deleteMany({ where: { jobId } });
-    if (staffIds.length) await db.jobAssignment.createMany({ data: staffIds.map((staffId, n) => ({ jobId, staffId, isLead: n === 0 })) });
+    await setJobTeam(db, jobId, staffIds);
     if (j.bookingId) await db.booking.update({ where: { id: j.bookingId }, data: { startAt: when } });
     await notify({ type: "SCHEDULE_CHANGE", title: `Job ${j.ref} moved`, link: `/jobs/${jobId}` }, db);
     return db.job.update({ where: { id: jobId }, data: { scheduledAt: when } });

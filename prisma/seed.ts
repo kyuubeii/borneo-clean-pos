@@ -15,7 +15,7 @@ const pick = <T,>(a: T[], i: number) => a[i % a.length];
 
 async function main() {
   console.log("Clearing…");
-  for (const m of ["auditLog","chatMessage","notification","payout","expense","expenseCategory","payment","invoiceItem","invoice","quoteItem","quote","timeEntry","photo","checklistItem","jobAssignment","job","bookingItem","booking","address","customer","availability","staff","user","service"]) {
+  for (const m of ["auditLog","chatMessage","chatThread","notificationReceipt","notification","payout","expense","expenseCategory","payment","invoiceItem","invoice","quoteItem","quote","timeEntry","photo","checklistItem","jobAssignment","job","bookingItem","booking","address","customer","availability","staff","user","service"]) {
     await (db as any)[m].deleteMany();
   }
   // Settings are reset too, but never the API key someone configured in the UI.

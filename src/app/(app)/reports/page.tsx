@@ -44,7 +44,9 @@ export default function Reports() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Sales earned" value={<Money cents={s?.salesCents ?? 0} />} tone="good"
           sub={<>Collected <Money cents={s?.revenueCollectedCents ?? 0} /> · owing <Money cents={s?.outstandingCents ?? 0} /></>} />
-        <Stat label="Expenses" value={<Money cents={s?.expenseCents ?? 0} />} tone="warn" sub={<>Labour <Money cents={s?.labourCents ?? 0} /></>} />
+        {/* Every cost profit is net of, so the three parts add up to what was deducted. */}
+        <Stat label="Costs" value={<Money cents={s?.totalCostCents ?? 0} />} tone="warn"
+          sub={<>Expenses <Money cents={s?.expenseCents ?? 0} /> · Labour <Money cents={s?.labourCents ?? 0} /> · Materials <Money cents={s?.materialCents ?? 0} /></>} />
         <Stat label="Profit" value={<Money cents={s?.profitCents ?? 0} />} tone={(s?.profitCents ?? 0) >= 0 ? "good" : "bad"} sub={`${s?.marginPct ?? 0}% margin · sales less costs`} />
         <Stat label="Jobs" value={s?.jobsScheduled ?? 0} sub={`${s?.jobsCompleted ?? 0} completed · ${s?.jobsCancelled ?? 0} cancelled`} />
       </div>

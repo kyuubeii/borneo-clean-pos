@@ -29,6 +29,8 @@ model User {
   createdAt DateTime @default(now())
   auditLogs AuditLog[]
   notifications Notification[]
+  notificationReceipts NotificationReceipt[]
+  chatThreads ChatThread[]
 }
 
 model Staff {
@@ -194,6 +196,10 @@ model JobAssignment {
   staffId String
   staff   Staff  @relation(fields: [staffId], references: [id], onDelete: Cascade)
   isLead  Boolean @default(false)
+  // What this cleaner is paid for this job, set by hand on the job's costing.
+  // Null means "work it out from their pay rate". Job costing, payroll and the
+  // reports all read it through labourFor(), so the three always agree.
+  labourCents Int?
   @@unique([jobId, staffId])
   @@index([staffId])
 }
@@ -375,7 +381,24 @@ model Notification {
   link      String?
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
+  receipts  NotificationReceipt[]
   @@index([userId, createdAt])
+}
+
+/**
+ * Read and dismissed state, per person. Most notifications are broadcast
+ * (userId null), so a flag on the notification itself would mean one person
+ * clearing the bell cleared it for everybody.
+ */
+model NotificationReceipt {
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  notificationId String
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+  read           Boolean      @default(false)
+  dismissed      Boolean      @default(false)
+  @@id([userId, notificationId])
+  @@index([notificationId])
 }
 
 model AuditLog {
@@ -398,6 +421,17 @@ model AuditLog {
 model Setting {
   key   String @id
   value String
+}
+
+/** One assistant conversation. ChatMessage.threadId points here by id. */
+model ChatThread {
+  id        String   @id
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now())
+  @@index([userId, updatedAt])
 }
 
 model ChatMessage {

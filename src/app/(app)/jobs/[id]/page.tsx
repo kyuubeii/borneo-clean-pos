@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Badge, Money, Empty, Modal, Field, callAction, toast } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
-import { fmtDateTime, toInput, minsToLabel } from "@/lib/dates";
+import { fmtDateTime, toInput, minsToLabel, isoDate } from "@/lib/dates";
 import { toCents, fmt } from "@/lib/money";
 import { useIsStaff } from "@/components/UserProvider";
 
@@ -22,7 +22,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
   const [notes, setNotes] = useState<string | null>(null);
   const [price, setPrice] = useState(false);
   const [move, setMove] = useState(false);
-  const [materials, setMaterials] = useState(false);
+  const [editCosting, setEditCosting] = useState(false);
   const isStaff = useIsStaff();
   const [busy, setBusy] = useState(false);
 
@@ -150,7 +150,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
             <div className="card card-pad">
               <div className="mb-3 flex items-center justify-between">
                 <p className="section-title">{t("job.costing")}</p>
-                {!isStaff && <button onClick={() => setMaterials(true)} className="btn-ghost btn-sm">Edit materials</button>}
+                {!isStaff && <button onClick={() => setEditCosting(true)} className="btn-ghost btn-sm">{t("common.edit")}</button>}
               </div>
               <dl className="space-y-1.5 text-sm">
                 <CostRow k={t("job.revenue")} v={costing.data.revenueCents} />
@@ -162,7 +162,8 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
                     {costing.data.labourBreakdown.map((b: any) => (
                       <div key={b.staff} className="flex items-center justify-between text-[11px] text-ink-400">
                         <dt>
-                          {b.staff} · {b.payType === "HOURLY" ? `${minsToLabel(b.minutes)}${b.estimated ? " (scheduled)" : " tracked"}`
+                          {b.staff} · {b.fixed ? "set amount"
+                            : b.payType === "HOURLY" ? `${minsToLabel(b.minutes)}${b.estimated ? " (scheduled)" : " tracked"}`
                             : b.payType === "PER_JOB" ? "per job" : "% of revenue"}
                         </dt>
                         <dd><Money cents={-b.costCents} /></dd>
@@ -172,6 +173,16 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
                 )}
                 <CostRow k={t("job.material")} v={-costing.data.materialCents} />
                 <CostRow k={t("job.otherExpenses")} v={-costing.data.otherExpenseCents} />
+                {costing.data.expenses?.length > 0 && (
+                  <div className="space-y-0.5 pl-3">
+                    {costing.data.expenses.map((e: any) => (
+                      <div key={e.id} className="flex items-center justify-between gap-2 text-[11px] text-ink-400">
+                        <dt className="truncate">{[e.category, e.vendor || e.note].filter(Boolean).join(" · ") || e.ref}{e.staff ? ` · paid by ${e.staff}` : ""}</dt>
+                        <dd><Money cents={-e.amountCents} /></dd>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex items-center justify-between border-t border-ink-100 pt-2">
                   <dt className="text-sm font-medium">Profit</dt>
                   <dd className={`text-base font-semibold ${costing.data.profitCents >= 0 ? "text-emerald-600" : "text-red-600"}`}>
@@ -202,7 +213,7 @@ export default function JobDetail({ params }: { params: Promise<{ id: string }> 
       <NotesModal value={notes} onClose={() => setNotes(null)} job={j} onDone={reload} />
       <PriceModal open={price} onClose={() => setPrice(false)} job={j} onDone={reload} />
       <MoveCustomerModal open={move} onClose={() => setMove(false)} job={j} onDone={reload} />
-      <MaterialsModal open={materials} onClose={() => setMaterials(false)} job={j} onDone={reload} />
+      {costing.data && <CostingModal open={editCosting} onClose={() => setEditCosting(false)} job={j} costing={costing.data} onDone={reload} />}
     </div>
   );
 }
@@ -414,32 +425,216 @@ function PriceModal({ open, onClose, job, onDone }: any) {
   );
 }
 
-/** Materials bought for the job -- cleaning supplies, consumables, parts. */
-function MaterialsModal({ open, onClose, job, onDone }: any) {
+type LabourRow = { staffId: string; name: string; basis: string; calculatedCents: number; amount: string; isNew: boolean; original: number | null };
+type ExpenseRow = { key: string; id?: string; ref?: string; amount: string; category: string; vendor: string;
+  staffId: string; reimbursable: boolean; reimbursed: boolean; date: string; original?: any };
+
+const cents = (s: string) => (s.trim() === "" ? null : toCents(s));
+const payBasis = (b: { payType: string; payRate: number }) => b.payRate === 0 ? "no pay rate set"
+  : b.payType === "HOURLY" ? `${fmt(b.payRate)}/hr` : b.payType === "PER_JOB" ? `${fmt(b.payRate)}/job` : `${b.payRate / 100}% of job`;
+
+/**
+ * Everything that costs the job money, edited together: what each cleaner is
+ * paid for it, the materials it used, and the expenses booked against it.
+ * Labour set here is what payroll pays and the reports deduct; the expenses are
+ * real expense records, so they also show under Expenses and reimbursements.
+ */
+function CostingModal({ open, onClose, job, costing, onDone }: any) {
   const t = useT();
-  const [amount, setAmount] = useState((job.materialCostCents / 100).toFixed(2));
+  const staff = useAction<any[]>("staff.list", {});
+  const cats = useAction<any[]>("expenses.categories", {});
+  const [labour, setLabour] = useState<LabourRow[]>([]);
+  const [materials, setMaterials] = useState("");
+  const [expenses, setExpenses] = useState<ExpenseRow[]>([]);
+  const [removed, setRemoved] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (open) setAmount((job.materialCostCents / 100).toFixed(2)); }, [open, job.materialCostCents]);
-  async function go() {
-    const cents = toCents(amount);
-    if (cents < 0) return toast("Materials cannot be negative", "err");
+  const jobDate = isoDate(new Date(job.scheduledAt));
+
+  useEffect(() => {
+    if (!open) return;
+    setLabour(costing.labourBreakdown.map((b: any) => ({
+      staffId: b.staffId, name: b.staff, basis: payBasis(b), calculatedCents: b.calculatedCents,
+      amount: b.fixed ? (b.costCents / 100).toFixed(2) : "", isNew: false, original: b.fixed ? b.costCents : null,
+    })));
+    setMaterials((costing.materialCents / 100).toFixed(2));
+    setExpenses(costing.expenses.map((e: any) => ({
+      key: e.id, id: e.id, ref: e.ref, amount: (e.amountCents / 100).toFixed(2), category: e.category ?? "",
+      vendor: e.vendor ?? e.note ?? "", staffId: e.staffId ?? "", reimbursable: e.reimbursable, reimbursed: e.reimbursed,
+      date: isoDate(new Date(e.spentAt)), original: e,
+    })));
+    setRemoved([]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const setL = (i: number, patch: Partial<LabourRow>) => setLabour((rows) => rows.map((r, n) => n === i ? { ...r, ...patch } : r));
+  const setE = (i: number, patch: Partial<ExpenseRow>) => setExpenses((rows) => rows.map((r, n) => n === i ? { ...r, ...patch } : r));
+  const available = (staff.data ?? []).filter((s) => !labour.some((l) => l.staffId === s.id));
+
+  function addCleaner(id: string) {
+    const s = (staff.data ?? []).find((x) => x.id === id);
+    if (!s) return;
+    // Mirrors labourFor() on the server: hourly on a finished job with nothing
+    // tracked is estimated from the scheduled duration.
+    const calc = s.payType === "PER_JOB" ? s.payRate : s.payType === "PERCENT" ? Math.round((job.revenueCents * s.payRate) / 10000)
+      : job.status === "COMPLETED" ? Math.round((job.durationMin / 60) * s.payRate) : 0;
+    setLabour((rows) => [...rows, { staffId: s.id, name: s.name, basis: payBasis(s), calculatedCents: calc, amount: "", isNew: true, original: null }]);
+  }
+  function removeExpense(i: number) {
+    const row = expenses[i];
+    if (row.id) setRemoved((r) => [...r, row.id!]);
+    setExpenses((rows) => rows.filter((_, n) => n !== i));
+  }
+
+  // Live totals, so the effect of an edit on profit is visible before saving.
+  const labourTotal = labour.reduce((a, l) => a + (cents(l.amount) ?? l.calculatedCents), 0);
+  const materialTotal = cents(materials) ?? 0;
+  const expenseTotal = expenses.reduce((a, e) => a + (cents(e.amount) ?? 0), 0);
+  const profit = job.revenueCents - labourTotal - materialTotal - expenseTotal;
+
+  async function save() {
+    for (const l of labour) if (l.amount.trim() && !(toCents(l.amount) >= 0 && /\d/.test(l.amount))) return toast(`Check the labour amount for ${l.name}`, "err");
+    if (materialTotal < 0) return toast("Materials cannot be negative", "err");
+    for (const e of expenses) if (!((cents(e.amount) ?? 0) > 0)) return toast("Every expense needs an amount above zero", "err");
+
+    const labourChanges = labour.filter((l) => l.isNew || cents(l.amount) !== l.original)
+      .map((l) => ({ staffId: l.staffId, labourCents: cents(l.amount) }));
+    const fields = (e: ExpenseRow) => ({
+      amountCents: toCents(e.amount), categoryName: e.category.trim() || undefined, vendor: e.vendor.trim() || null,
+      staffId: e.staffId || null, reimbursable: !!e.staffId && e.reimbursable, spentAt: new Date(e.date || jobDate).toISOString(),
+    });
+    const changed = (e: ExpenseRow) => {
+      const o = e.original, f = fields(e);
+      return f.amountCents !== o.amountCents || (f.categoryName ?? "") !== (o.category ?? "") || (f.vendor ?? "") !== (o.vendor ?? o.note ?? "")
+        || (f.staffId ?? null) !== (o.staffId ?? null) || f.reimbursable !== o.reimbursable || e.date !== isoDate(new Date(o.spentAt));
+    };
+    const payload: any = { jobId: job.id };
+    if (labourChanges.length) payload.labour = labourChanges;
+    if (materialTotal !== costing.materialCents) payload.materialCostCents = materialTotal;
+    const adds = expenses.filter((e) => !e.id).map(fields);
+    const updates = expenses.filter((e) => e.id && changed(e)).map((e) => {
+      const f: any = fields(e);
+      // An unchanged vendor may really be the note; leave it alone rather than move it.
+      if ((f.vendor ?? "") === (e.original.vendor ?? e.original.note ?? "")) delete f.vendor;
+      return { expenseId: e.id, ...f };
+    });
+    if (adds.length) payload.addExpenses = adds;
+    if (updates.length) payload.updateExpenses = updates;
+    if (removed.length) payload.removeExpenseIds = removed;
+    if (Object.keys(payload).length === 1) { onClose(); return; }
+
     setBusy(true);
-    try { await callAction("jobs.update", { jobId: job.id, materialCostCents: cents }); toast("Materials updated"); onDone(); onClose(); }
+    try { await callAction("jobs.updateCosting", payload); toast("Costing saved"); onDone(); onClose(); }
     catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
   }
+
   return (
-    <Modal open={open} onClose={onClose} title={`Materials · ${job.ref}`}>
-      <div className="space-y-3">
-        <Field label="Materials cost (RM)" hint="Supplies and consumables used on this job. Counts against the job's profit.">
-          <input className="input" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} />
-        </Field>
-        <p className="text-[11px] text-ink-400">
-          Money paid to a supplier and reimbursed to a cleaner belongs in Expenses against
-          this job instead — that keeps the reimbursement trail. This field is for stock
-          already owned that the job used up.
-        </p>
-        <div className="flex justify-end gap-2"><button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
-          <button onClick={go} disabled={busy} className="btn-primary">{busy ? t("common.saving") : t("common.save")}</button></div>
+    <Modal open={open} onClose={onClose} title={`${t("job.costing")} · ${job.ref}`} wide>
+      <div className="space-y-5">
+        <section>
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="section-title">{t("job.labour")}</p>
+            <span className="text-xs text-ink-500"><Money cents={labourTotal} /></span>
+          </div>
+          <p className="mb-2 text-[11px] text-ink-400">What you pay each cleaner for this job. Leave blank to use their pay rate. This is the amount Payroll pays.</p>
+          <div className="space-y-2">
+            {labour.map((l, i) => (
+              <div key={l.staffId} className="flex items-center gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-ink-800">{l.name}{l.isNew && <span className="ml-1.5 badge bg-brand-50 text-brand-600">new</span>}</p>
+                  <p className="text-[11px] text-ink-400">{l.basis} · calculated <Money cents={l.calculatedCents} /></p>
+                </div>
+                <div className="relative w-32">
+                  <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-400">RM</span>
+                  <input className="input pl-9 text-right" inputMode="decimal" value={l.amount}
+                    placeholder={(l.calculatedCents / 100).toFixed(2)} aria-label={`Labour for ${l.name}`}
+                    onChange={(e) => setL(i, { amount: e.target.value })} />
+                </div>
+                {l.isNew ? (
+                  <button onClick={() => setLabour((rows) => rows.filter((_, n) => n !== i))} title="Remove" className="rounded-md p-1.5 text-ink-400 hover:bg-ink-100 hover:text-red-600">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                  </button>
+                ) : <span className="w-[26px]" />}
+              </div>
+            ))}
+            {!labour.length && <p className="rounded-lg bg-ink-50 p-2.5 text-xs text-ink-500">No cleaner on this job yet. Add one below to record what they were paid.</p>}
+            {available.length > 0 && (
+              <select className="input w-auto text-xs" value="" onChange={(e) => addCleaner(e.target.value)}>
+                <option value="">+ Add cleaner…</option>
+                {available.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            )}
+            <p className="text-[11px] text-ink-400">Paid someone who is not on your staff list? Add it under Other expenses with the category Labour.</p>
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="section-title">{t("job.material")}</p>
+            <span className="text-xs text-ink-500"><Money cents={materialTotal} /></span>
+          </div>
+          <div className="flex items-center gap-2">
+            <p className="flex-1 text-[11px] text-ink-400">Supplies and consumables from your own stock that this job used up.</p>
+            <div className="relative w-32">
+              <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-400">RM</span>
+              <input className="input pl-9 text-right" inputMode="decimal" value={materials} aria-label="Materials cost" onChange={(e) => setMaterials(e.target.value)} />
+            </div>
+            <span className="w-[26px]" />
+          </div>
+        </section>
+
+        <section>
+          <div className="mb-1.5 flex items-center justify-between">
+            <p className="section-title">{t("job.otherExpenses")}</p>
+            <span className="text-xs text-ink-500"><Money cents={expenseTotal} /></span>
+          </div>
+          <p className="mb-2 text-[11px] text-ink-400">Money spent for this job — transport, parking, supplies bought for it. Saved as expenses, so they also appear under Expenses.</p>
+          <datalist id="costing-categories">{(cats.data ?? []).map((c) => <option key={c.id} value={c.name} />)}</datalist>
+          <div className="space-y-2">
+            {expenses.map((e, i) => (
+              <div key={e.key} className="rounded-lg border border-ink-100 p-2.5">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-[1fr_1.4fr_7.5rem]">
+                  <input className="input text-xs" list="costing-categories" placeholder="Category" value={e.category} onChange={(x) => setE(i, { category: x.target.value })} aria-label="Category" />
+                  <input className="input text-xs" placeholder="What / where (optional)" value={e.vendor} onChange={(x) => setE(i, { vendor: x.target.value })} aria-label="Description" />
+                  <div className="relative col-span-2 sm:col-span-1">
+                    <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-ink-400">RM</span>
+                    <input className="input pl-9 text-right text-xs" inputMode="decimal" placeholder="0.00" value={e.amount} onChange={(x) => setE(i, { amount: x.target.value })} aria-label="Amount" />
+                  </div>
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input type="date" className="input w-auto py-1 text-xs" value={e.date} onChange={(x) => setE(i, { date: x.target.value })} aria-label="Date" />
+                  <select className="input w-auto py-1 text-xs" value={e.staffId} aria-label="Paid by"
+                    onChange={(x) => setE(i, { staffId: x.target.value, reimbursable: !!x.target.value })}>
+                    <option value="">Paid by business</option>
+                    {(staff.data ?? []).map((s) => <option key={s.id} value={s.id}>Paid by {s.name}</option>)}
+                  </select>
+                  {e.staffId && (
+                    <label className="flex items-center gap-1.5 text-[11px] text-ink-500">
+                      <input type="checkbox" checked={e.reimbursable} onChange={(x) => setE(i, { reimbursable: x.target.checked })} /> Owed back
+                    </label>
+                  )}
+                  {e.reimbursed && <span className="badge bg-emerald-50 text-emerald-600">Reimbursed</span>}
+                  {e.ref && <span className="text-[10px] text-ink-300">{e.ref}</span>}
+                  <button onClick={() => removeExpense(i)} className="ml-auto rounded-md px-2 py-1 text-[11px] text-ink-400 hover:bg-red-50 hover:text-red-600">Remove</button>
+                </div>
+              </div>
+            ))}
+            <button onClick={() => setExpenses((rows) => [...rows, { key: `new-${Date.now()}`, amount: "", category: "", vendor: "", staffId: "", reimbursable: false, reimbursed: false, date: jobDate }])}
+              className="btn-outline btn-sm">+ Add expense</button>
+          </div>
+        </section>
+
+        <div className="rounded-lg bg-ink-50 p-3 text-sm">
+          <div className="flex justify-between text-xs text-ink-500"><span>{t("job.revenue")}</span><Money cents={job.revenueCents} /></div>
+          <div className="flex justify-between text-xs text-ink-500"><span>Total costs</span><Money cents={-(labourTotal + materialTotal + expenseTotal)} /></div>
+          <div className="mt-1 flex justify-between border-t border-ink-200 pt-1 font-semibold">
+            <span>Profit</span><span className={profit >= 0 ? "text-emerald-600" : "text-red-600"}><Money cents={profit} /></span>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="btn-outline">{t("common.cancel")}</button>
+          <button onClick={save} disabled={busy} className="btn-primary">{busy ? t("common.saving") : t("common.save")}</button>
+        </div>
       </div>
     </Modal>
   );

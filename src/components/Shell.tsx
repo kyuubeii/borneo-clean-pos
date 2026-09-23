@@ -43,21 +43,49 @@ export default function Shell({ user, children }: { user: { id: string; name: st
   const [mobileNav, setMobileNav] = useState(false);
   const [ai, setAi] = useState(false);
   const [notes, setNotes] = useState<any[]>([]);
+  const [unread, setUnread] = useState(0);
   const [bell, setBell] = useState(false);
+  // Ids that were unread when the bell was opened. The badge clears as soon as
+  // the bell opens, but these stay highlighted while it is open so it is still
+  // clear which ones are new.
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
 
   useEffect(() => { setMobileNav(false); }, [path]);
-  // Once per session, then on a slow poll. This used to re-fetch on every
-  // navigation, putting a request in front of each page change for a bell badge.
+  // Once per session, then on a slow poll and whenever the tab comes back into
+  // focus. This used to re-fetch on every navigation, putting a request in front
+  // of each page change for a bell badge.
   useEffect(() => {
     let alive = true;
     const load = () => fetch("/api/notifications").then((r) => r.json())
-      .then((j) => { if (alive) setNotes(j.items ?? []); }).catch(() => {});
+      .then((j) => { if (alive) { setNotes(j.items ?? []); setUnread(j.unread ?? 0); } }).catch(() => {});
     load();
     const id = setInterval(load, 60_000);
-    return () => { alive = false; clearInterval(id); };
+    const onFocus = () => document.visibilityState === "visible" && load();
+    document.addEventListener("visibilitychange", onFocus);
+    return () => { alive = false; clearInterval(id); document.removeEventListener("visibilitychange", onFocus); };
   }, []);
 
-  const unread = notes.filter((n) => !n.read).length;
+  const bellPost = (op: "read" | "dismiss", id?: string) =>
+    fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op, id }) }).catch(() => {});
+
+  function toggleBell() {
+    if (bell) { setBell(false); return; }
+    setBell(true);
+    setFresh(new Set(notes.filter((n) => !n.read).map((n) => n.id)));
+    if (unread > 0) {
+      setUnread(0);
+      setNotes((ns) => ns.map((n) => ({ ...n, read: true })));
+      bellPost("read");
+    }
+  }
+  function dismiss(id: string) {
+    setNotes((ns) => ns.filter((n) => n.id !== id));
+    bellPost("dismiss", id);
+  }
+  function clearAll() {
+    setNotes([]); setUnread(0);
+    bellPost("dismiss");
+  }
 
   async function signOut() {
     await fetch("/api/auth", { method: "DELETE" });
@@ -155,24 +183,34 @@ export default function Shell({ user, children }: { user: { id: string; name: st
           <div className="flex-1" />
           <LocaleToggle />
           <div className="relative">
-            <button onClick={() => setBell((b) => !b)} className="relative rounded-lg p-2 text-ink-500 hover:bg-ink-100">
+            <button onClick={toggleBell} aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`} className="relative rounded-lg p-2 text-ink-500 hover:bg-ink-100">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0"/></svg>
-              {unread > 0 && <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">{unread}</span>}
+              {unread > 0 && <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">{unread > 99 ? "99+" : unread}</span>}
             </button>
             {bell && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setBell(false)} />
-                <div className="absolute right-0 z-20 mt-1 w-80 overflow-hidden rounded-xl border border-ink-200 bg-white shadow-xl">
-                  <div className="border-b border-ink-100 px-3.5 py-2.5 text-xs font-semibold text-ink-600">Notifications</div>
+                <div className="absolute right-0 z-20 mt-1 w-80 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-xl border border-ink-200 bg-white shadow-xl">
+                  <div className="flex items-center justify-between border-b border-ink-100 px-3.5 py-2">
+                    <span className="text-xs font-semibold text-ink-600">Notifications</span>
+                    {notes.length > 0 && (
+                      <button onClick={clearAll} className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-ink-400 hover:bg-ink-100 hover:text-ink-700">Clear all</button>
+                    )}
+                  </div>
                   <div className="max-h-80 overflow-y-auto">
-                    {notes.length === 0 && <p className="px-3.5 py-6 text-center text-xs text-ink-400">{t("common.empty")}</p>}
+                    {notes.length === 0 && <p className="px-3.5 py-6 text-center text-xs text-ink-400">You're all caught up</p>}
                     {notes.map((n) => (
-                      <Link key={n.id} href={n.link ?? "#"} onClick={() => setBell(false)}
-                        className={`block border-b border-ink-50 px-3.5 py-2.5 hover:bg-ink-50 ${!n.read ? "bg-brand-50/40" : ""}`}>
-                        <p className="text-xs font-medium text-ink-800">{n.title}</p>
-                        {n.body && <p className="mt-0.5 text-[11px] text-ink-400">{n.body}</p>}
-                        <p className="mt-0.5 text-[10px] text-ink-300">{new Date(n.createdAt).toLocaleString("en-MY")}</p>
-                      </Link>
+                      <div key={n.id} className={`group relative border-b border-ink-50 hover:bg-ink-50 ${fresh.has(n.id) ? "bg-brand-50/40" : ""}`}>
+                        <Link href={n.link ?? "#"} onClick={() => setBell(false)} className="block py-2.5 pl-3.5 pr-9">
+                          <p className="text-xs font-medium text-ink-800">{n.title}</p>
+                          {n.body && <p className="mt-0.5 text-[11px] text-ink-400">{n.body}</p>}
+                          <p className="mt-0.5 text-[10px] text-ink-300">{new Date(n.createdAt).toLocaleString("en-MY")}</p>
+                        </Link>
+                        <button onClick={() => dismiss(n.id)} title="Dismiss" aria-label={`Dismiss ${n.title}`}
+                          className="absolute right-2 top-2 rounded-md p-1 text-ink-300 opacity-60 transition hover:bg-ink-200 hover:text-ink-700 group-hover:opacity-100 focus:opacity-100">
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                        </button>
+                      </div>
                     ))}
                   </div>
                 </div>

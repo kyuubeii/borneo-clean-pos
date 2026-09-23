@@ -4,6 +4,7 @@ import { db } from "../db";
 import { optionalId, nullableId, optionalText, clearableText } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { totals, syncInvoiceStatus, fmt } from "../money";
+import { setReceipts } from "../notify";
 
 const ADMIN = ["OWNER", "ADMIN"] as const;
 
@@ -520,14 +521,18 @@ defineAction({
 
 defineAction({
   name: "notifications.markRead",
-  description: "Mark notifications as read — one by id, or all of them.",
+  description: "Mark notifications as read for the signed-in user — one by id, or all of them.",
   category: "Notifications", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ notificationId: optionalId().describe("Omit to mark every notification read") }),
-  handler: async ({ notificationId }, ctx) => {
-    if (notificationId) { await db.notification.update({ where: { id: notificationId }, data: { read: true } }); return { read: 1 }; }
-    const r = await db.notification.updateMany({ where: { OR: [{ userId: null }, { userId: ctx.user.id }], read: false }, data: { read: true } });
-    return { read: r.count };
-  },
+  handler: async ({ notificationId }, ctx) => ({ read: await setReceipts(ctx.user.id, { read: true }, notificationId) }),
+});
+
+defineAction({
+  name: "notifications.dismiss",
+  description: "Clear notifications from the signed-in user's bell — one by id, or all of them. Other users still see theirs.",
+  category: "Notifications", roles: ["OWNER", "ADMIN", "STAFF"],
+  input: z.object({ notificationId: optionalId().describe("Omit to clear every notification") }),
+  handler: async ({ notificationId }, ctx) => ({ dismissed: await setReceipts(ctx.user.id, { dismissed: true }, notificationId) }),
 });
 
 defineAction({
