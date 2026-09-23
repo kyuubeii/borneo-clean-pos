@@ -14,3 +14,6 @@ backups
 
 .git
 .claude
+
+# iOS app -- built in Xcode, not by Vercel.
+ios
