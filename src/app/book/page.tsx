@@ -127,6 +127,9 @@ export default function PublicBooking() {
             {locale === "zh" ? "我们会致电确认时间后才正式安排。" : "We'll call to confirm before the job is scheduled."}
           </p>
         </div>
+        <p className="pb-2 text-center text-[11px] text-ink-400">
+          <a href="/privacy" className="underline hover:text-ink-600">{locale === "zh" ? "隐私政策" : "Privacy policy"}</a>
+        </p>
       </form>
     </div>
   );

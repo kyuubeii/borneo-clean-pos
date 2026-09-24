@@ -50,6 +50,9 @@ export default function Login() {
           {err && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-medium text-red-600">{err}</p>}
           <button className="btn-primary w-full" disabled={busy}>{busy ? "…" : t("auth.signIn")}</button>
         </form>
+        <p className="mt-4 text-center text-[11px] text-ink-400">
+          <a href="/privacy" className="underline hover:text-ink-600">Privacy policy</a>
+        </p>
       </div>
     </div>
   );
