@@ -175,10 +175,24 @@ async function main() {
       const before = await client.notification.count();
       const r = await testPush(cleaner.id);
       assert.equal(r.configured, true);
-      assert.deepEqual(r.config, { keyId: true, teamId: true, key: true, topic: "com.borneoclean.app" });
+      assert.equal(r.config.keyId && r.config.teamId && r.config.key && r.config.keyLoads, true);
+      assert.equal(r.config.keyIdLength, 10);
+      assert.equal(r.config.topic, "com.borneoclean.app");
       assert.deepEqual(r.results, [{ environment: "sandbox", status: 200, reason: undefined }]);
       assert.equal(hits.at(-1)!.token, CLEANER_TK);
       assert.equal(await client.notification.count(), before);
+    });
+
+    await check("the key works however it was pasted", async () => {
+      const { normaliseKey } = await import("../src/lib/push");
+      const pem = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+      const body = pem.replace(/-----[A-Z ]+-----/g, "").replace(/\s+/g, "");
+      const loads = (k: string) => crypto.createPrivateKey(normaliseKey(k)).asymmetricKeyType === "ec";
+      for (const [how, k] of [
+        ["as the file", pem], ["one line with \\n", pem.replace(/\n/g, "\\n")], ["breaks as spaces", pem.replace(/\n/g, " ")],
+        ["body only", body], ["body in quotes", `"${body}"`], ["body over lines", body.match(/.{1,64}/g)!.join("\n")],
+      ] as const) assert.ok(loads(k), how);
+      assert.equal(normaliseKey("not a key"), "not a key");
     });
 
     await check("notification text gives times on the Kuching clock, whatever the server's zone", async () => {

@@ -28,13 +28,24 @@ export function defaultTypes(role: string): string[] {
 
 export const typeBucket = (type: string) => ((PUSH_TYPES as readonly string[]).includes(type) ? type : "OTHER");
 
+/**
+ * The .p8 key as a PEM, however it was pasted: with its BEGIN/END lines, on
+ * one line with literal "\n"s, with the line breaks turned into spaces, in
+ * quotes, or just the base64 body between the lines. Apple's .p8 is always a
+ * PKCS#8 "PRIVATE KEY", so the body alone is enough to rebuild it.
+ */
+export function normaliseKey(raw: string) {
+  const s = raw.replace(/\\n/g, "\n").trim().replace(/^["']+|["']+$/g, "");
+  const body = s.replace(/-----(BEGIN|END) [A-Z ]*PRIVATE KEY-----/g, "").replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(body) || body.length < 100) return s;
+  return `-----BEGIN PRIVATE KEY-----\n${body.match(/.{1,64}/g)!.join("\n")}\n-----END PRIVATE KEY-----\n`;
+}
+
 const env = () => ({
-  keyId: process.env.APNS_KEY_ID ?? "",
-  teamId: process.env.APNS_TEAM_ID ?? "",
-  // Vercel keeps a multi-line value as typed, but a key pasted onto one line
-  // arrives with literal "\n"s; accept both.
-  key: (process.env.APNS_KEY ?? "").replace(/\\n/g, "\n"),
-  topic: process.env.APNS_BUNDLE_ID || "com.borneoclean.app",
+  keyId: (process.env.APNS_KEY_ID ?? "").trim(),
+  teamId: (process.env.APNS_TEAM_ID ?? "").trim(),
+  key: normaliseKey(process.env.APNS_KEY ?? ""),
+  topic: (process.env.APNS_BUNDLE_ID || "com.borneoclean.app").trim(),
 });
 
 export const apnsConfigured = () => {
@@ -176,9 +187,15 @@ async function deliver<D extends Device>(devices: D[], bodyFor: (d: D) => string
  */
 export async function testPush(userId: string) {
   const e = env();
+  let keyLoads = false;
+  try { keyLoads = crypto.createPrivateKey(e.key).asymmetricKeyType === "ec"; } catch {}
   const config = {
     keyId: Boolean(e.keyId), teamId: Boolean(e.teamId),
     key: e.key.includes("BEGIN PRIVATE KEY") && e.key.includes("END PRIVATE KEY"),
+    // Whether it is an Apple (P-256) key Node can read, and how long the pasted
+    // value was -- enough to spot a truncated or wrong paste, nothing of the key itself.
+    keyLoads, keyLength: (process.env.APNS_KEY ?? "").length,
+    keyIdLength: e.keyId.length, teamIdLength: e.teamId.length,
     topic: e.topic,
   };
   const devices = await db.pushDevice.findMany({ where: { userId } });
