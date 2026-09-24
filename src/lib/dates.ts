@@ -14,6 +14,13 @@ export const fmtDateTime = (d: Date) => `${fmtDate(d)} · ${fmtTime(d)}`;
 export const BUSINESS_TZ = "Asia/Kuching";
 /** A date and time as the office reads it, for text the server writes (notifications). */
 export const fmtStamp = (d: Date) => d.toLocaleString("en-MY", { timeZone: BUSINESS_TZ });
+
+/** The date, 24-hour time and weekday on the Kuching clock, whatever the server's zone. */
+export function businessClock(d: Date) {
+  const part = (o: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-GB", { timeZone: BUSINESS_TZ, ...o }).format(d);
+  const [dd, mm, yyyy] = part({ day: "2-digit", month: "2-digit", year: "numeric" }).split("/");
+  return { date: `${yyyy}-${mm}-${dd}`, time: part({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" }), weekday: part({ weekday: "long" }) };
+}
 export const toInput = (d: Date) => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;

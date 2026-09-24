@@ -200,6 +200,11 @@ async function main() {
       assert.match(fmtStamp(new Date("2026-09-24T02:00:00Z")), /10:00:00\s?am/i);
     });
 
+    await check("the assistant's clock is Kuching's: 1:30 am Friday there is still Thursday in UTC", async () => {
+      const { businessClock } = await import("../src/lib/dates");
+      assert.deepEqual(businessClock(new Date("2026-09-24T17:30:00Z")), { date: "2026-09-25", time: "01:30", weekday: "Friday" });
+    });
+
     console.log(`${passed} push checks passed`);
   } finally {
     prod.close(); sandbox.close();

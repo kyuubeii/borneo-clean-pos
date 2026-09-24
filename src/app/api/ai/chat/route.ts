@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { getUser } from "@/lib/auth";
 import { runAction, toolSchemas, getAction, resolveAction } from "@/lib/actions";
 import { aiConfig, chatCompletion, getSetting, type ORMessage } from "@/lib/openrouter";
-import { isoDate } from "@/lib/dates";
+import { businessClock } from "@/lib/dates";
 import { PENDING, CONTEXT_MESSAGES, contextWindow, titleFrom } from "@/lib/chat";
 
 /**
@@ -27,16 +27,17 @@ async function resolveToolMessage(threadId: string, toolCallId: string | undefin
 }
 
 function systemPrompt(user: { name: string; role: string }, business: string) {
-  const now = new Date();
+  // The server runs on UTC; the business, and everything the user says, is on Kuching time.
+  const now = businessClock(new Date());
   return `You are the operations assistant for ${business}, a cleaning business in Kuching, Sarawak, Malaysia.
 
 You are talking to ${user.name} (role: ${user.role}). You operate the application on their behalf by calling tools.
 
 CURRENT CONTEXT
-- Now: ${now.toString()}
-- Today's date: ${isoDate(now)} (${now.toLocaleDateString("en-MY", { weekday: "long" })})
+- Now: ${now.date} ${now.time}, Kuching time (UTC+08:00)
+- Today's date: ${now.date} (${now.weekday})
 - Currency: Malaysian Ringgit (RM). All monetary values in tool inputs and outputs are INTEGER CENTS. RM 120 is 12000. Always show money to the user as "RM 120.00", never as cents.
-- Timezone: local. When the user says "tomorrow at 2pm", resolve it to a concrete ISO datetime yourself before calling a tool.
+- Timezone: Asia/Kuching, UTC+08:00, no daylight saving. Every time the user mentions is Kuching time. When the user says "tomorrow at 2pm", resolve it yourself to an ISO datetime WITH the +08:00 offset before calling a tool, e.g. "2026-01-15T14:00:00+08:00" — never a bare time or a "Z" time. For a from/to date range, pass plain Kuching dates like "2026-01-15".
 
 HOW TO WORK
 - Resolve names to IDs first. If the user says "John", call customers_search, then use the returned id. Never invent an ID.
