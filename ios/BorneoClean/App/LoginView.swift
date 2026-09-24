@@ -16,7 +16,7 @@ struct LoginView: View {
             ScrollView {
                 VStack(spacing: 28) {
                     VStack(spacing: 12) {
-                        BrandMark(size: 64)
+                        BrandMark(size: 96)
                         Text(t("app.name")).font(.title.weight(.bold))
                         Text(t("app.tagline")).font(.subheadline).foregroundStyle(.secondary)
                     }

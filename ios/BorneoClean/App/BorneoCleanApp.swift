@@ -35,7 +35,7 @@ struct RootView: View {
             ZStack {
                 Color(.systemGroupedBackground).ignoresSafeArea()
                 VStack(spacing: 14) {
-                    BrandMark(size: 56)
+                    BrandMark(size: 88)
                     ProgressView()
                 }
             }
@@ -47,16 +47,18 @@ struct RootView: View {
     }
 }
 
+/// The Borneo Clean emblem (house, map, broom) on a white tile, as on the app icon.
 struct BrandMark: View {
     var size: CGFloat = 40
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.28)
-            .fill(LinearGradient(colors: [Brand.b500, Brand.b700], startPoint: .topLeading, endPoint: .bottomTrailing))
+        Image("BrandEmblem")
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
             .frame(width: size, height: size)
-            .overlay {
-                Image(systemName: "house")
-                    .font(.system(size: size * 0.45, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
+            .background(Color.white)
+            .clipShape(.rect(cornerRadius: size * 0.22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous).strokeBorder(Color.black.opacity(0.06)))
+            .accessibilityHidden(true)
     }
 }
