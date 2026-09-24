@@ -4,7 +4,7 @@ import { totals } from "../money";
 import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { nextRef } from "../ref";
-import { startOfDay, endOfDay, addDays, addMonths } from "../dates";
+import { startOfDay, endOfDay, addDays, addMonths, fmtStamp } from "../dates";
 import { assertAvailable, scheduleWrite, setJobStatus } from "../scheduling";
 import { notify } from "../notify";
 
@@ -138,7 +138,7 @@ defineAction({
       }
     }
     await notify({ type: "BOOKING_CONFIRMED", title: `Booking ${first.booking.ref} confirmed`,
-      body: `${customer.name} · ${start.toLocaleString("en-MY")}`, link: `/bookings/${first.booking.id}` }, db);
+      body: `${customer.name} · ${fmtStamp(start)}`, link: `/bookings/${first.booking.id}` }, db);
     return { booking: first.booking, jobRef: first.job?.ref, recurringCreated: extra.length, recurringRefs: extra,
       total: services.reduce((a: number, s: any) => a + s.priceCents, 0) };
     });
@@ -158,7 +158,7 @@ defineAction({
     const updated = await db.booking.update({ where: { id: bookingId }, data: { startAt: when } });
     if (b.job) await db.job.update({ where: { id: b.job.id }, data: { scheduledAt: when } });
     await notify({ type: "SCHEDULE_CHANGE", title: `Booking ${b.ref} moved`,
-      body: `${b.customer.name} → ${when.toLocaleString("en-MY")}${reason ? ` (${reason})` : ""}`, link: `/bookings/${bookingId}` }, db);
+      body: `${b.customer.name} → ${fmtStamp(when)}${reason ? ` (${reason})` : ""}`, link: `/bookings/${bookingId}` }, db);
     return { ref: b.ref, from: b.startAt, to: updated.startAt };
   }),
 });

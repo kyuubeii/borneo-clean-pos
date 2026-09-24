@@ -388,6 +388,30 @@ struct SettingsView: View {
 
 struct NotificationPrefsView: View {
     @State private var push = Push.shared
+    @State private var testing = false
+    @State private var testResult: String?
+
+    /// Apple's answer per phone, in words.
+    private func sendTest() async {
+        testing = true; defer { testing = false }
+        do {
+            let r = try await API.shared.pushTest()
+            if r["configured"].bool != true {
+                let c = r["config"]
+                let missing = [("APNS_KEY_ID", c["keyId"].bool), ("APNS_TEAM_ID", c["teamId"].bool), ("APNS_KEY", c["key"].bool)]
+                    .filter { $0.1 != true }.map(\.0)
+                testResult = "The server has no working Apple key. Missing or incomplete on Vercel: \(missing.joined(separator: ", "))."
+                return
+            }
+            if let e = r["error"].string { testResult = "The Apple key on the server could not sign: \(e)"; return }
+            let lines = r["results"].array.enumerated().map { n, d -> String in
+                let where_ = d["environment"].str == "sandbox" ? "development build" : "App Store/TestFlight build"
+                return d["status"].int == 200 ? "Phone \(n + 1) (\(where_)): sent ✓"
+                    : "Phone \(n + 1) (\(where_)): Apple refused — \(d["status"].int.map(String.init) ?? "?") \(d["reason"].str)"
+            }
+            testResult = lines.isEmpty ? "No phone is registered for your account yet." : lines.joined(separator: "\n")
+        } catch { testResult = error.localizedDescription }
+    }
     var body: some View {
         Form {
             Section {
@@ -404,6 +428,14 @@ struct NotificationPrefsView: View {
                 }
                 if let e = push.lastError { Text(e).font(.caption).foregroundStyle(.red) }
             } footer: { Text("The bell in the app always shows everything, exactly as on the web. These switches only choose what also pops up on this phone.") }
+
+            Section {
+                Button { Task { await sendTest() } } label: {
+                    HStack { Text(testing ? "Sending…" : "Send a test notification"); Spacer(); if testing { ProgressView() } }
+                }
+                .disabled(!push.registered || testing)
+                if let testResult { Text(testResult).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
+            } footer: { Text("Sends to your own phones only, and shows what Apple answered if it does not arrive.") }
 
             Section("Alert me about") {
                 ForEach(PUSH_TYPES) { ty in

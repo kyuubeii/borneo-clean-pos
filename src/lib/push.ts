@@ -120,6 +120,20 @@ export async function dispatchPush(notificationId: string) {
   const badges = new Map<string, number>();
   for (const userId of new Set(wanted.map((d) => d.userId))) badges.set(userId, await unreadCount(userId));
 
+  await deliver(wanted, (d) => JSON.stringify({
+    aps: { alert: { title: n.title, ...(n.body ? { body: n.body } : {}) }, sound: "default", badge: badges.get(d.userId) ?? 0 },
+    link: n.link ?? null, notificationId: n.id, type: n.type,
+  }));
+}
+
+type Device = { id: string; token: string; environment: string };
+export type Delivery = { environment: string; status: number; reason?: string };
+
+/**
+ * Send one payload per phone over each phone's own APNs host, forget phones
+ * Apple says are gone, and report what Apple answered for each.
+ */
+async function deliver<D extends Device>(devices: D[], bodyFor: (d: D) => string): Promise<Delivery[]> {
   const sessions = new Map<string, http2.ClientHttp2Session>();
   const session = (e: Environment) => {
     if (!sessions.has(e)) sessions.set(e, sessionFor(host(e)));
@@ -127,11 +141,8 @@ export async function dispatchPush(notificationId: string) {
   };
 
   try {
-    await Promise.all(wanted.map(async (d) => {
-      const body = JSON.stringify({
-        aps: { alert: { title: n.title, ...(n.body ? { body: n.body } : {}) }, sound: "default", badge: badges.get(d.userId) ?? 0 },
-        link: n.link ?? null, notificationId: n.id, type: n.type,
-      });
+    return await Promise.all(devices.map(async (d): Promise<Delivery> => {
+      const body = bodyFor(d);
       const home: Environment = d.environment === "sandbox" ? "sandbox" : "production";
       let r = await sendOne(session(home), d.token, body);
       // A development build's token is refused by the production host and the
@@ -141,7 +152,7 @@ export async function dispatchPush(notificationId: string) {
         const retry = await sendOne(session(other), d.token, body);
         if (retry.status === 200) {
           await db.pushDevice.update({ where: { id: d.id }, data: { environment: other } }).catch(() => {});
-          return;
+          return { environment: other, ...retry };
         }
         r = retry;
       }
@@ -150,10 +161,39 @@ export async function dispatchPush(notificationId: string) {
       } else if (r.status !== 200) {
         console.error("push not delivered", { status: r.status, reason: r.reason });
       }
+      return { environment: home, ...r };
     }));
   } finally {
     for (const s of sessions.values()) s.close();
   }
+}
+
+/**
+ * "Send a test notification": straight to the signed-in person's own phones,
+ * waiting for Apple's answer so the settings screen can say why a push did
+ * not arrive. Writes nothing to the bell. Says whether each setting is
+ * present, never what it is.
+ */
+export async function testPush(userId: string) {
+  const e = env();
+  const config = {
+    keyId: Boolean(e.keyId), teamId: Boolean(e.teamId),
+    key: e.key.includes("BEGIN PRIVATE KEY") && e.key.includes("END PRIVATE KEY"),
+    topic: e.topic,
+  };
+  const devices = await db.pushDevice.findMany({ where: { userId } });
+  if (!apnsConfigured()) return { configured: false, config, devices: devices.length, results: [] as Delivery[] };
+  let results: Delivery[];
+  try {
+    results = await deliver(devices, () => JSON.stringify({
+      aps: { alert: { title: "Borneo Clean", body: "Test notification: push is working on this phone." }, sound: "default" },
+      link: null, type: "OTHER",
+    }));
+  } catch (err) {
+    // A key that is present but will not sign (a damaged paste) lands here.
+    return { configured: true, config, devices: devices.length, results: [], error: String((err as Error)?.message ?? err) };
+  }
+  return { configured: true, config, devices: devices.length, results };
 }
 
 /**

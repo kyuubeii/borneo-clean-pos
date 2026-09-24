@@ -5,7 +5,7 @@ import { z } from "zod";
 import { db } from "../db";
 import { optionalId, optionalText, nullableId, clearableText } from "../schema";
 import { defineAction, ActionError } from "../registry";
-import { startOfDay, endOfDay } from "../dates";
+import { startOfDay, endOfDay, fmtStamp } from "../dates";
 import { notify } from "../notify";
 import { isUploadedFileUrl } from "../storage";
 
@@ -81,7 +81,7 @@ defineAction({
     const when = new Date(scheduledAt);
     await assertAvailable(db, j.assignments.map((a: any) => a.staffId), when, j.durationMin, jobId);
     if (j.bookingId) await db.booking.update({ where: { id: j.bookingId }, data: { startAt: when } });
-    await notify({ type: "SCHEDULE_CHANGE", title: `Job ${j.ref} moved`, body: `${j.customer.name} → ${when.toLocaleString("en-MY")}`, link: `/jobs/${jobId}` }, db);
+    await notify({ type: "SCHEDULE_CHANGE", title: `Job ${j.ref} moved`, body: `${j.customer.name} → ${fmtStamp(when)}`, link: `/jobs/${jobId}` }, db);
     return db.job.update({ where: { id: jobId }, data: { scheduledAt: when } });
   }),
 });

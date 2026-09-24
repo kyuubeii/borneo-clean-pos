@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { nextRef } from "@/lib/ref";
 import { notify } from "@/lib/notify";
 import { audit } from "@/lib/audit";
+import { fmtStamp } from "@/lib/dates";
 
 /**
  * Run next to the database.
@@ -50,7 +51,7 @@ export async function POST(req: NextRequest) {
   } });
 
   await notify({ type: "BOOKING_CONFIRMED", title: `Online booking request ${booking.ref}`,
-    body: `${customer.name} · ${new Date(b.startAt).toLocaleString("en-MY")}`, link: `/bookings/${booking.id}` });
+    body: `${customer.name} · ${fmtStamp(new Date(b.startAt))}`, link: `/bookings/${booking.id}` });
   await audit({ actorName: customer.name, action: "bookings.requestOnline", source: "system",
     entity: "Booking", entityId: booking.id, payload: { name, phone }, ok: true });
 

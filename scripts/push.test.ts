@@ -170,6 +170,22 @@ async function main() {
       assert.ok(!hits.some((h) => h.token === CLEANER_TK && h.body.aps.alert.title === "Booking BKG-9001 confirmed"));
     });
 
+    await check("a test push reaches only the caller's phones and reports Apple's answer", async () => {
+      const { testPush } = await import("../src/lib/push");
+      const before = await client.notification.count();
+      const r = await testPush(cleaner.id);
+      assert.equal(r.configured, true);
+      assert.deepEqual(r.config, { keyId: true, teamId: true, key: true, topic: "com.borneoclean.app" });
+      assert.deepEqual(r.results, [{ environment: "sandbox", status: 200, reason: undefined }]);
+      assert.equal(hits.at(-1)!.token, CLEANER_TK);
+      assert.equal(await client.notification.count(), before);
+    });
+
+    await check("notification text gives times on the Kuching clock, whatever the server's zone", async () => {
+      const { fmtStamp } = await import("../src/lib/dates");
+      assert.match(fmtStamp(new Date("2026-09-24T02:00:00Z")), /10:00:00\s?am/i);
+    });
+
     console.log(`${passed} push checks passed`);
   } finally {
     prod.close(); sandbox.close();

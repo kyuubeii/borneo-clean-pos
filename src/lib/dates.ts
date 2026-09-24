@@ -9,6 +9,11 @@ export const sameDay = (a: Date, b: Date) => startOfDay(a).getTime() === startOf
 export const fmtTime = (d: Date) => d.toLocaleTimeString("en-MY", { hour: "numeric", minute: "2-digit", hour12: true });
 export const fmtDate = (d: Date) => d.toLocaleDateString("en-MY", { day: "numeric", month: "short", year: "numeric" });
 export const fmtDateTime = (d: Date) => `${fmtDate(d)} · ${fmtTime(d)}`;
+
+/** The business's clock. The server runs on UTC, so text it writes for people names this zone. */
+export const BUSINESS_TZ = "Asia/Kuching";
+/** A date and time as the office reads it, for text the server writes (notifications). */
+export const fmtStamp = (d: Date) => d.toLocaleString("en-MY", { timeZone: BUSINESS_TZ });
 export const toInput = (d: Date) => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;

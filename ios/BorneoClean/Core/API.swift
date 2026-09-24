@@ -278,6 +278,13 @@ final class API {
         return j["device"]
     }
 
+    /// /api/push/test: a push to this person's own phones, with Apple's answer for each.
+    func pushTest() async throws -> JSON {
+        let (j, _) = try await send(request("api/push/test"))
+        guard j["ok"].bool == true else { throw APIError(message: j["error"].string ?? "Could not send a test notification.") }
+        return j
+    }
+
     func unregisterDevice(token: String) async {
         let body: JSON = ["token": .string(token)]
         _ = try? await send(request("api/push/device", method: "DELETE", body: body.data()))
