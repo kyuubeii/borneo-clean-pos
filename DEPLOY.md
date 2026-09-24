@@ -1,6 +1,9 @@
 # Deploying Borneo Clean
 
-Live at <https://borneoclean.vercel.app> (Vercel project `borneoclean`).
+Live at <https://borneoclean.vercel.app> (Vercel project `borneo-clean-pos`).
+The project named `borneoclean` serves borneocleanl.vercel.app (note the extra
+"l") and is the spare. Environment variables are per project: set them on
+`borneo-clean-pos` for the live site, then redeploy.
 
 Repository: <https://github.com/kyuubeii/borneo-clean-pos> (private — it contains
 real customer names, phone numbers and addresses in `scripts/customer-profiles.json`,
@@ -106,8 +109,8 @@ duplicated, so a failed attempt does not leave an orphan holding the address.
 
 ## Deploying
 
-Both Vercel projects — `borneoclean` (live, borneoclean.vercel.app) and
-`borneo-clean-pos` (spare, same database) — are linked to
+Both Vercel projects — `borneo-clean-pos` (live, borneoclean.vercel.app) and
+`borneoclean` (spare, borneocleanl.vercel.app, same database) — are linked to
 `kyuubeii/borneo-clean-pos` with production branch `main` and automatic
 deployments enabled. Pushing to `main` deploys both:
 
