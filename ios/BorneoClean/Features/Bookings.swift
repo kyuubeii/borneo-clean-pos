@@ -67,7 +67,7 @@ struct BookingFormView: View {
                                 MoneyText(cents: s["priceCents"].i).font(.subheadline.weight(.medium)).foregroundStyle(on ? Brand.b700 : .secondary)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.row)
                     }
                 }
 
@@ -103,7 +103,7 @@ struct BookingFormView: View {
                                     if on { Image(systemName: "checkmark").foregroundStyle(Brand.b600) }
                                 }
                             }
-                            .buttonStyle(.plain)
+                            .buttonStyle(.row)
                             .disabled(!on && (checking || !(a?["available"].truthy ?? false)))
                         }
                     } header: { Text("Assign cleaners") } footer: {
@@ -279,6 +279,7 @@ struct BookingsView: View {
         }
         .task(id: key) { if !query.isEmpty { try? await Task.sleep(nanoseconds: 250_000_000) }; await load() }
         .refreshable { await load() }
+        .onChange(of: app.refreshTick) { Task { await load() } }
         .onChange(of: query) { page = 0 }
         .onChange(of: scope) { page = 0 }
         .onChange(of: status) { page = 0 }
@@ -388,7 +389,7 @@ struct BookingDetailView: View {
                     KV(k: t("common.duration"), v: Fmt.minsToLabel(b["durationMin"].i))
                     NavigationLink(value: Route.customer(b["customerId"].str)) { KV(k: t("common.customer"), v: b["customer"]["name"].str, tone: Brand.b600) }
                     let addr = b["address"].exists ? [b["address"]["line1"], b["address"]["city"]].compactMap(\.nonEmpty).joined(separator: ", ") : "—"
-                    if addr != "—" { Button { openMaps(addr) } label: { KV(k: t("common.address"), v: addr) }.buttonStyle(.plain) }
+                    if addr != "—" { Button { openMaps(addr) } label: { KV(k: t("common.address"), v: addr) }.buttonStyle(.row) }
                     else { KV(k: t("common.address"), v: "—") }
                 }
                 if let n = b["notes"].nonEmpty { Section(t("job.instructions")) { Text(n).font(.subheadline) } }

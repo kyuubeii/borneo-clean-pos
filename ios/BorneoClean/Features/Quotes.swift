@@ -386,6 +386,7 @@ struct ReportsView: View {
         .navigationTitle(t("nav.reports"))
         .task(id: preset) { await load() }
         .refreshable { await load() }
+        .onChange(of: AppState.shared.refreshTick) { Task { await load() } }
     }
 
     @ViewBuilder private func table(_ title: String, _ rows: [(String, String, String)], cols: (String, String, String)) -> some View {

@@ -104,7 +104,31 @@ final class API {
         guard j["ok"].bool == true else {
             throw APIError(message: humanError(j["error"].string ?? "Action failed"), code: j["code"].string)
         }
+        if !Self.readOnly.contains(name) { didWrite() }
         return j["data"]
+    }
+
+    /// The actions marked `readOnly: true` in src/lib/actions. Anything else
+    /// changed something, so the other tabs reload rather than show old figures.
+    static let readOnly: Set<String> = [
+        "audit.list", "bookings.get", "bookings.list", "customers.get", "customers.lapsed", "customers.search",
+        "expenses.categories", "expenses.list", "invoices.get", "invoices.list", "jobs.costing", "jobs.get", "jobs.list",
+        "lookup.byRef", "notifications.list", "payments.list", "payments.outstanding", "payroll.calculate", "payroll.list",
+        "quotes.get", "quotes.list", "reports.dailyBriefing", "reports.expenseBreakdown", "reports.myDay",
+        "reports.revenueByService", "reports.revenueTrend", "reports.staffPerformance", "reports.summary",
+        "reports.topCustomers", "search.global", "services.list", "settings.get", "staff.advances", "staff.findAvailable",
+        "staff.list", "staff.workHistory", "users.list",
+    ]
+
+    private var refreshTask: Task<Void, Never>?
+    /// One refresh for a burst of writes (a costing save sends several).
+    private func didWrite() {
+        refreshTask?.cancel()
+        refreshTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            AppState.shared.refreshAll()
+        }
     }
 
     /**

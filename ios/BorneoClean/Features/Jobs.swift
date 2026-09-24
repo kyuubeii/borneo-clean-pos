@@ -214,7 +214,7 @@ struct JobDetailView: View {
                         Text(c["label"].str).strikethrough(c["done"].truthy).foregroundStyle(c["done"].truthy ? .secondary : .primary)
                     }
                 }
-                .buttonStyle(.plain).disabled(busy)
+                .buttonStyle(.row).disabled(busy)
             }
             HStack {
                 TextField("Add an item", text: $newChecklist).submitLabel(.done).onSubmit { Task { await addChecklist() } }
@@ -328,7 +328,7 @@ struct JobDetailView: View {
                 Button { sheet = .resched } label: { Label(t("bk.reschedule"), systemImage: "calendar.badge.clock") }
                 Button { sheet = .price } label: { Label("Edit amount", systemImage: "banknote") }
                 Button { sheet = .costing } label: { Label("Edit job costing", systemImage: "list.bullet.rectangle") }
-                Button { sheet = .move } label: { Label("Change customer", systemImage: "person.crop.circle.badge.arrow.forward") }
+                Button { sheet = .move } label: { Label("Change customer", systemImage: "arrow.left.arrow.right") }
                 Button { sheet = .assign } label: { Label(t("job.cleaners"), systemImage: "person.2") }
             }
             Button { sheet = .notes } label: { Label(t("common.notes"), systemImage: "note.text") }

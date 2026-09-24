@@ -209,7 +209,7 @@ struct CalendarView: View {
                         .frame(maxWidth: .infinity, minHeight: 58)
                         .background(inMonth ? Color.clear : Color(.tertiarySystemFill).opacity(0.5))
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.row)
                 }
             }
         } footer: { Text("Tap a day to see its jobs. The small figure is that day's job value in RM.") }
@@ -262,7 +262,7 @@ struct WeekStrip: View {
                     .frame(maxWidth: .infinity).padding(.vertical, 6)
                     .background(on ? Brand.b600 : Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 10))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.row)
             }
         }
     }

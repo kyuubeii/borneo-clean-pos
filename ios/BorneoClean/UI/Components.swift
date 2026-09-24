@@ -391,3 +391,15 @@ struct ShellToolbar: ToolbarContent {
         }
     }
 }
+
+/// A tappable row: the whole row answers, not just its text. `.plain` only
+/// hit-tests the parts that draw something, so the gap between a label and
+/// its price did nothing when tapped.
+struct RowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.55 : 1)
+    }
+}
+extension ButtonStyle where Self == RowButtonStyle { static var row: RowButtonStyle { RowButtonStyle() } }

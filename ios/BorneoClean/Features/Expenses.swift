@@ -42,7 +42,7 @@ struct ExpensesView: View {
                 else if data?.isEmpty == true { Text(t("common.empty")).foregroundStyle(.secondary) }
                 ForEach((data ?? []).rows()) { e in
                     Button { if !isStaff { editing = e.json } } label: { ExpenseRowView(e: e, isStaff: isStaff) }
-                        .buttonStyle(.plain)
+                        .buttonStyle(.row)
                         .swipeActions {
                             if !isStaff && e["reimbursable"].truthy && !e["reimbursed"].truthy {
                                 Button("Reimburse") { reimbursing = e.json }.tint(Brand.good)

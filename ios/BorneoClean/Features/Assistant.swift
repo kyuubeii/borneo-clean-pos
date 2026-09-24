@@ -45,7 +45,7 @@ struct AssistantView: View {
                                             Text(s).font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
                                                 .padding(12).background(Color(.secondarySystemGroupedBackground), in: .rect(cornerRadius: 12))
                                         }
-                                        .buttonStyle(.plain)
+                                        .buttonStyle(.row)
                                     }
                                 }
                             }

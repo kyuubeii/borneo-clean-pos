@@ -2,7 +2,11 @@ import SwiftUI
 
 // MARK: - Picker (CustomerPicker.tsx)
 
-/// Search and choose a customer, or create one on the spot.
+/**
+ Choose a customer, or create one on the spot. The web shows a search box
+ with the results underneath; on a phone that pushed the rest of the form off
+ the screen, so the search opens as its own sheet.
+ */
 struct CustomerPicker: View {
     @Binding var customerId: String
     /// Called with the full customer record (addresses included) once chosen.
@@ -10,11 +14,8 @@ struct CustomerPicker: View {
     var disabled = false
 
     @State private var selected: JSON?
-    @State private var query = ""
-    @State private var results: [JSON] = []
-    @State private var loading = false
     @State private var error: String?
-    @State private var creating = false
+    @State private var searching = false
 
     var body: some View {
         Group {
@@ -25,57 +26,82 @@ struct CustomerPicker: View {
                         if let c = s["company"].nonEmpty { Text(c).font(.caption).foregroundStyle(.secondary) }
                     }
                     Spacer()
-                    if !disabled { Button("Change") { customerId = ""; selected = nil; onSelected(nil) }.font(.subheadline) }
+                    if !disabled { Button("Change") { searching = true }.font(.subheadline).buttonStyle(.borderless) }
                 }
             } else if !customerId.isEmpty {
-                HStack { Text("Loading selected customer…").foregroundStyle(.secondary); Spacer(); ProgressView() }
+                if let error { LoadErrorView(error: error) { Task { await loadSelected() } } }
+                else { HStack { Text("Loading selected customer…").foregroundStyle(.secondary); Spacer(); ProgressView() } }
             } else if !disabled {
-                TextField("Search name, phone or company…", text: $query)
-                    .autocorrectionDisabled()
-                if let error { Text(humanError(error)).font(.caption).foregroundStyle(.red) }
-                else if loading && results.isEmpty { Text("Loading customers…").font(.caption).foregroundStyle(.secondary) }
-                else if results.isEmpty { Text("No matching customers.").font(.caption).foregroundStyle(.secondary) }
-                ForEach(results.rows()) { c in
-                    Button { customerId = c.id } label: {
-                        HStack {
-                            Text(c["name"].str).foregroundStyle(.primary)
-                            Text(c["company"].nonEmpty ?? c["phone"].str).font(.caption).foregroundStyle(.secondary)
-                            Spacer()
+                Button { searching = true } label: {
+                    HStack { Label("Choose customer…", systemImage: "person.crop.circle.badge.plus"); Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary) }
+                }
+            }
+        }
+        .task(id: customerId) { await loadSelected() }
+        .sheet(isPresented: $searching) {
+            CustomerSearchSheet { id in
+                if id != customerId { selected = nil; customerId = id }
+            }
+        }
+    }
+
+    private func loadSelected() async {
+        guard !customerId.isEmpty else { selected = nil; onSelected(nil); return }
+        do {
+            let c = try await API.shared.call("customers.get", ["customerId": .string(customerId)])
+            selected = c; error = nil
+            onSelected(c)
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+/// customers.search with the web picker's limit, and New customer.
+struct CustomerSearchSheet: View {
+    let onPick: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    @State private var results: [JSON]?
+    @State private var error: String?
+    @State private var creating = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Button { creating = true } label: { Label("New customer", systemImage: "plus") }
+                if let error { LoadErrorView(error: error) { Task { await search() } } }
+                if results == nil && error == nil { LoadingRow() }
+                else if results?.isEmpty == true { Text("No matching customers.").foregroundStyle(.secondary) }
+                ForEach((results ?? []).rows()) { c in
+                    Button { onPick(c.id); dismiss() } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(c["name"].str).foregroundStyle(Color.primary)
+                            let sub = [c["company"].nonEmpty ?? c["phone"].nonEmpty, c["addresses"][0]["line1"].nonEmpty].compactMap { $0 }.joined(separator: " · ")
+                            if !sub.isEmpty { Text(sub).font(.caption).foregroundStyle(Color.secondary).lineLimit(1) }
                         }
                     }
                 }
-                Button { creating = true } label: { Label("New customer", systemImage: "plus") }
             }
-        }
-        .task(id: query) {
-            guard selected == nil, customerId.isEmpty else { return }
-            try? await Task.sleep(nanoseconds: 200_000_000)
-            await search()
-        }
-        .task(id: customerId) { await loadSelected() }
-        .sheet(isPresented: $creating) {
-            CustomerFormView(initial: nil) { c in
-                if let c { customerId = c.id }
+            .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search name, phone or company…")
+            .navigationTitle(t("common.customer"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(t("common.cancel")) { dismiss() } } }
+            .task(id: query) {
+                if !query.isEmpty { try? await Task.sleep(nanoseconds: 200_000_000) }
+                await search()
+            }
+            .sheet(isPresented: $creating) {
+                CustomerFormView(initial: nil) { c in
+                    if let c { onPick(c.id); dismiss() }
+                }
             }
         }
     }
 
     private func search() async {
-        loading = true
         var input: JSON = ["limit": 20]
         input.set("query", JSON.orOmit(query))
         do { results = try await API.shared.call("customers.search", input).array; error = nil }
         catch { self.error = error.localizedDescription }
-        loading = false
-    }
-
-    private func loadSelected() async {
-        guard !customerId.isEmpty else { selected = nil; await search(); return }
-        do {
-            let c = try await API.shared.call("customers.get", ["customerId": .string(customerId)])
-            selected = c
-            onSelected(c)
-        } catch { self.error = error.localizedDescription }
     }
 }
 
@@ -300,6 +326,7 @@ struct CustomersView: View {
         }
         .task(id: q) { try? await Task.sleep(nanoseconds: 250_000_000); await load() }
         .refreshable { await load() }
+        .onChange(of: app.refreshTick) { Task { await load() } }
         .sheet(isPresented: $creating) { CustomerFormView(initial: nil) { _ in Task { await load() } } }
         .sheet(item: Binding(get: { editing.map { Row($0) } }, set: { editing = $0?.json })) { r in
             CustomerFormView(initial: r.json) { _ in Task { await load() } }
@@ -377,7 +404,7 @@ struct CustomerDetailView: View {
                             }
                             let line = [a["line1"], a["line2"], a["city"], a["postcode"], a["state"]].compactMap(\.nonEmpty).joined(separator: ", ")
                             Button { openMaps(line) } label: { Text(line).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.leading) }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.row)
                             if let n = a["accessNotes"].nonEmpty { Label(n, systemImage: "key").font(.caption).foregroundStyle(.secondary) }
                         }
                         .swipeActions(edge: .trailing) {

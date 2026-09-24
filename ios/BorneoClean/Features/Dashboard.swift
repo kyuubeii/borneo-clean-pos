@@ -78,7 +78,7 @@ struct DashboardView: View {
                                     .padding(.horizontal, 14).padding(.vertical, 9)
                                     .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(.row)
                                 Divider().padding(.leading, 14)
                             }
                         }
@@ -250,7 +250,7 @@ struct StaffDashboardView: View {
                         }
                         if let a = j["address"].nonEmpty {
                             Button { openMaps(a) } label: { Label(a, systemImage: "mappin.and.ellipse").font(.subheadline) }
-                                .buttonStyle(.plain).foregroundStyle(.secondary)
+                                .buttonStyle(.row).foregroundStyle(.secondary)
                         }
                         if j["checklistTotal"].i > 0 {
                             ProgressView(value: Double(j["checklistDone"].i), total: Double(j["checklistTotal"].i)) {

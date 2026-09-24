@@ -206,7 +206,7 @@ struct AuditView: View {
                                 fg: a["source"].str == "assistant" ? Brand.b700 : a["source"].str == "system" ? .purple : Brand.ink500)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.row)
                     if expanded == a.id {
                         Text("INPUT").font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                         Text(pretty(a["payload"].string)).font(.system(size: 10, design: .monospaced)).textSelection(.enabled)
