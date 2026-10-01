@@ -18,7 +18,8 @@ struct ExpensesView: View {
     private var isStaff: Bool { app.user?.isStaff == true }
 
     var body: some View {
-        let total = (data ?? []).reduce(0) { $0 + $1["amountCents"].i }
+        // An expense on a cancelled job stays listed but is not a cost, as in the reports.
+        let total = (data ?? []).filter { !$0["jobCancelled"].truthy }.reduce(0) { $0 + $1["amountCents"].i }
         // Net of reimbursements already paid back, not the gross of every advance.
         let owedTotal = advances.reduce(0) { $0 + $1["stillOwedCents"].i }
         List {
@@ -143,6 +144,8 @@ struct ExpenseRowView: View {
             Spacer()
             VStack(alignment: .trailing, spacing: 4) {
                 MoneyText(cents: e["amountCents"].i).font(.subheadline.weight(.semibold))
+                    .strikethrough(e["jobCancelled"].truthy).foregroundStyle(e["jobCancelled"].truthy ? .secondary : .primary)
+                if e["jobCancelled"].truthy { Tag(text: "Job cancelled · not counted", bg: Color(hex: 0xFEF2F2), fg: Color(hex: 0xEF4444)) }
                 if e["reimbursable"].truthy {
                     if e["reimbursed"].truthy { Tag(text: "Reimbursed", bg: Color(hex: 0xECFDF5), fg: Brand.good) }
                     else if isStaff { Tag(text: t("staff.awaitingReimb"), bg: Color(hex: 0xFFFBEB), fg: Color(hex: 0xB45309)) }

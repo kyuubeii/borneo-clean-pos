@@ -326,6 +326,7 @@ struct BillQuoteSheet: View {
 
 struct ReportsView: View {
     @State private var preset = "month"
+    @State private var month = Fmt.startOfMonth(Date())
     @State private var s: JSON?
     @State private var byService: [JSON] = []
     @State private var topCust: [JSON] = []
@@ -334,15 +335,15 @@ struct ReportsView: View {
     @State private var trend: [JSON] = []
     @State private var error: String?
 
-    private static let presets: [(String, String)] = [("month", "This month"), ("last", "Last month"), ("90", "Last 90 days"), ("year", "Last 12 months")]
+    /// "month" is whichever month the picker shows; the others run back from today.
+    private static let presets: [(String, String)] = [("month", "Month"), ("90", "Last 90 days"), ("year", "Last 12 months")]
 
     private var period: (from: Date, to: Date) {
         let now = Date()
         switch preset {
-        case "last": return (Fmt.startOfMonth(Fmt.addMonths(now, -1)), Fmt.endOfMonth(Fmt.addMonths(now, -1)))
         case "90": return (Fmt.addDays(now, -90), now)
         case "year": return (Fmt.addMonths(now, -12), now)
-        default: return (Fmt.startOfMonth(now), Fmt.endOfMonth(now))
+        default: return (Fmt.startOfMonth(month), Fmt.endOfMonth(month))
         }
     }
 
@@ -350,6 +351,10 @@ struct ReportsView: View {
         List {
             Section {
                 ChipPicker(options: Self.presets, selection: $preset).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                if preset == "month" {
+                    HStack { MonthPicker(month: $month); Spacer() }.padding(.horizontal, 16)
+                        .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                }
             } footer: { Text("\(Fmt.date(period.from)) — \(Fmt.date(period.to))") }
             LoadErrorView(error: error) { Task { await load() } }
             Section {
@@ -384,7 +389,7 @@ struct ReportsView: View {
             table("Expenses by category", expenses.map { ($0["category"].str, "\($0["count"].i)", Fmt.moneyUI($0["amountCents"].i)) }, cols: ("Category", "Count", "Amount"))
         }
         .navigationTitle(t("nav.reports"))
-        .task(id: preset) { await load() }
+        .task(id: "\(preset)|\(Fmt.isoDate(month))") { await load() }
         .refreshable { await load() }
         .onChange(of: AppState.shared.refreshTick) { Task { await load() } }
     }

@@ -186,7 +186,8 @@ struct CalendarView: View {
                 }
                 ForEach(days, id: \.self) { d in
                     let cell = jobsOn(d)
-                    let revenue = cell.reduce(0) { $0 + $1["revenueCents"].i }
+                    // A cancelled job stays on the calendar but earns nothing, as in the reports.
+                    let revenue = cell.filter { $0["status"].str != "CANCELLED" }.reduce(0) { $0 + $1["revenueCents"].i }
                     let inMonth = Fmt.cal.component(.month, from: d) == month
                     let today = Fmt.sameDay(d, Date())
                     Button { if !cell.isEmpty || !isStaff { more = d } } label: {

@@ -237,7 +237,7 @@ struct AuditView: View {
 // MARK: - Settings (settings/page.tsx)
 
 /// What a setting shows before anyone has set it -- so what is on screen is what gets saved.
-private let DEFAULTS: [String: String] = ["invoice.taxRateBp": "0", "invoice.dueDays": "14"]
+private let DEFAULTS: [String: String] = ["invoice.taxRateBp": "0", "invoice.dueDays": "14", "reminders.days": "1"]
 private let MODELS = ["anthropic/claude-sonnet-4.5", "anthropic/claude-opus-4.1", "anthropic/claude-haiku-4.5",
                       "openai/gpt-4.1", "google/gemini-2.5-pro", "meta-llama/llama-3.3-70b-instruct"]
 
@@ -255,6 +255,15 @@ struct SettingsView: View {
 
     private func bind(_ k: String) -> Binding<String> {
         Binding(get: { f[k] ?? "" }, set: { f[k] = $0; dirty.insert(k) })
+    }
+    /// Booking reminder lead times, stored as "1,3" -- the same setting the web page writes.
+    private func reminderDay(_ d: String) -> Binding<Bool> {
+        Binding(get: { (f["reminders.days"] ?? "").split(separator: ",").contains(Substring(d)) }, set: { on in
+            var days = Set((f["reminders.days"] ?? "").split(separator: ",").map(String.init))
+            if on { days.insert(d) } else { days.remove(d) }
+            f["reminders.days"] = ["1", "3"].filter(days.contains).joined(separator: ",")
+            dirty.insert("reminders.days")
+        })
     }
     private func toggle(_ k: String) -> Binding<Bool> {
         Binding(get: { f[k] == "true" }, set: { f[k] = $0 ? "true" : "false"; dirty.insert(k) })
@@ -305,10 +314,14 @@ struct SettingsView: View {
 
             Section {
                 Toggle("Booking confirmations", isOn: toggle("notify.bookingConfirmation"))
-                Toggle("Job and schedule reminders", isOn: toggle("notify.reminders"))
                 Toggle("Payment reminders", isOn: toggle("notify.paymentReminders"))
                 NavigationLink(value: Route.notificationPrefs) { Text("Push notifications on this phone") }
             } header: { Text("Notifications") } footer: { Text("Notifications are delivered in-app. Push to this phone is chosen under Push notifications.") }
+
+            Section {
+                Toggle("1 day before", isOn: reminderDay("1"))
+                Toggle("3 days before", isOn: reminderDay("3"))
+            } header: { Text("Booking reminders") } footer: { Text("Sent each morning at about 8am for upcoming bookings. Turn both on for two reminders, or both off for none.") }
 
             Section {
                 Text(data?["ai.hasKey"] == "true" ? "✓ An OpenRouter API key is configured." : t("ai.noKey"))

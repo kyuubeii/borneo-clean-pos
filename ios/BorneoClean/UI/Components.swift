@@ -335,6 +335,30 @@ struct LabeledField: View {
 }
 
 /// Segmented filter chips that scroll sideways on a narrow screen.
+/// MonthPicker in ui.tsx: ‹ September 2026 ›, a month at a time, with
+/// "This month" to come back once you have stepped away.
+struct MonthPicker: View {
+    @Binding var month: Date
+    var body: some View {
+        let first = Fmt.startOfMonth(month)
+        let isCurrent = Fmt.sameDay(first, Fmt.startOfMonth(Date()))
+        HStack(spacing: 10) {
+            HStack(spacing: 0) {
+                Button { month = Fmt.addMonths(first, -1) } label: { Image(systemName: "chevron.left").padding(.horizontal, 12).padding(.vertical, 8) }
+                    .accessibilityLabel("Previous month")
+                Text(Fmt.monthYear(first)).font(.footnote.weight(.semibold)).monospacedDigit().frame(minWidth: 120)
+                Button { month = Fmt.addMonths(first, 1) } label: { Image(systemName: "chevron.right").padding(.horizontal, 12).padding(.vertical, 8) }
+                    .accessibilityLabel("Next month")
+            }
+            .buttonStyle(.plain)
+            .background(Color(.secondarySystemGroupedBackground), in: .capsule)
+            if !isCurrent {
+                Button(t("dash.thisMonth")) { month = Fmt.startOfMonth(Date()) }.font(.footnote.weight(.medium))
+            }
+        }
+    }
+}
+
 struct ChipPicker<T: Hashable>: View {
     let options: [(T, String)]
     @Binding var selection: T

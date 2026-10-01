@@ -12,22 +12,31 @@ struct DashboardView: View {
     @State private var outstandingErr: String?
     @State private var loaded = false
     @State private var newBooking = false
+    /// The month the sales figures and the revenue chart cover. Today's jobs,
+    /// what is owed, upcoming bookings and activity are always about now.
+    @State private var month = Fmt.startOfMonth(Date())
+
+    private var isThisMonth: Bool { Fmt.sameDay(month, Fmt.startOfMonth(Date())) }
+    private func inMonth(_ thisMonthKey: String, _ key: String) -> String {
+        isThisMonth ? t(thisMonthKey) : "\(t(key)) · \(Fmt.monthYear(month))"
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
+                HStack { Spacer(); MonthPicker(month: $month) }
                 LoadErrorView(error: summaryErr ?? outstandingErr) { Task { await load() } }
 
                 StatGrid {
                     let s = summary, o = outstanding
-                    StatTile(label: t("dash.salesMonth"), value: figure(s, summaryErr) { Fmt.moneyUI($0["salesCents"].i) },
+                    StatTile(label: inMonth("dash.salesMonth", "dash.sales"), value: figure(s, summaryErr) { Fmt.moneyUI($0["salesCents"].i) },
                              sub: s.map { "\(t("dash.collected")) \(Fmt.moneyUI($0["revenueCollectedCents"].i)) · \(t("dash.profit")) \(Fmt.moneyUI($0["profitCents"].i)) (\(pct($0["marginPct"]))%)" },
                              tone: s == nil ? .normal : (s!["profitCents"].i >= 0 ? .good : .bad))
                     StatTile(label: t("dash.outstanding"), value: figure(o, outstandingErr) { Fmt.moneyUI($0["totalOutstandingCents"].i) },
                              sub: o.map { "\($0["openInvoices"].i) open · \($0["overdueInvoices"].i) \(t("dash.overdueInvoices"))" },
                              tone: (o?["overdueCents"].i ?? 0) > 0 ? .warn : .normal)
-                    StatTile(label: t("dash.jobsThisMonth"), value: figure(s, summaryErr) { "\($0["jobsScheduled"].i)" },
-                             sub: s.map { "\($0["jobsCompleted"].i) \(t("dash.completed").lowercased())" })
+                    StatTile(label: inMonth("dash.jobsThisMonth", "dash.jobs"), value: figure(s, summaryErr) { "\($0["jobsScheduled"].i)" },
+                             sub: s.map { "\($0["jobsCompleted"].i) \(t("dash.completed").lowercased())\($0["jobsCancelled"].i > 0 ? " · \($0["jobsCancelled"].i) \(t("job.status.CANCELLED").lowercased())" : "")" })
                     StatTile(label: t("dash.avgJob"), value: figure(s, summaryErr) { Fmt.moneyUI($0["avgJobValueCents"].i) },
                              sub: s.map { "\($0["newCustomers"].i) \(t("dash.newCustomers").lowercased())" })
                 }
@@ -85,7 +94,7 @@ struct DashboardView: View {
                     }
                 }
 
-                Card(title: t("dash.revenueMonth")) {
+                Card(title: inMonth("dash.revenueMonth", "dash.revenue")) {
                     BarChart(data: trend, height: 128, showPeak: false).padding(14)
                 }
 
@@ -119,6 +128,7 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $newBooking) { BookingFormView(onDone: { Task { await load() } }) }
         .loads(load)
+        .onChange(of: month) { Task { await load() } }
     }
 
     @ViewBuilder private var attention: some View {
@@ -156,8 +166,7 @@ struct DashboardView: View {
     }
 
     func load() async {
-        let today = Date()
-        let monthFrom = Fmt.isoDate(Fmt.startOfMonth(today)), monthTo = Fmt.isoDate(Fmt.endOfMonth(today))
+        let monthFrom = Fmt.isoDate(Fmt.startOfMonth(month)), monthTo = Fmt.isoDate(Fmt.endOfMonth(month))
         let r = await API.shared.batch([
             ("reports.dailyBriefing", [:]),
             ("reports.summary", ["from": .string(monthFrom), "to": .string(monthTo)]),
