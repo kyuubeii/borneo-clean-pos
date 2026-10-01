@@ -79,6 +79,30 @@ export async function setJobTeam(client: any, jobId: string, staffIds: string[])
   return added;
 }
 
+/**
+ * A cancelled job earns nothing, so the invoice raised for it is voided -- as
+ * long as nothing has been paid on it and it does not also bill another job
+ * that is still going ahead. Otherwise it is left for a person to sort out
+ * (refund the deposit, or edit the lines), and the bell says so.
+ *
+ * Reopening the job does not bring the invoice back: set it back to Sent on
+ * the invoice, or raise a new one.
+ */
+async function voidUnpaidInvoice(client: any, job: { id: string; ref: string; invoiceId: string }) {
+  const inv = await client.invoice.findUnique({ where: { id: job.invoiceId }, include: { payments: true, jobs: { select: { id: true, status: true } } } });
+  if (!inv || inv.status === "VOID") return;
+  const paid = inv.payments.reduce((a: number, p: any) => a + (p.isRefund ? -p.amountCents : p.amountCents), 0);
+  const othersLive = inv.jobs.some((j: any) => j.id !== job.id && j.status !== "CANCELLED");
+  if (paid <= 0 && !othersLive) {
+    await client.invoice.update({ where: { id: inv.id }, data: { status: "VOID" } });
+    await notify({ type: "INVOICE", title: `Invoice ${inv.ref} voided`, body: `Job ${job.ref} was cancelled`, link: `/invoices/${inv.id}` }, client);
+  } else {
+    await notify({ type: "INVOICE", title: `Invoice ${inv.ref} needs checking`,
+      body: `Job ${job.ref} was cancelled, but ${paid > 0 ? "money has been paid on this invoice" : "it also bills another job"}, so it was not voided`,
+      link: `/invoices/${inv.id}` }, client);
+  }
+}
+
 /** Both entry points share completion, cancellation and reopening behavior. */
 export async function setJobStatus(client: any, jobId: string, status: string, bookingStatus?: string) {
   const job = await client.job.findUnique({ where: { id: jobId }, include: { assignments: true } });
@@ -92,6 +116,7 @@ export async function setJobStatus(client: any, jobId: string, status: string, b
     status: bookingStatus ?? (status === "COMPLETED" || status === "CANCELLED" ? status : "CONFIRMED"),
     ...(status !== "CANCELLED" ? { cancelReason: null } : {}),
   } });
+  if (status === "CANCELLED" && job.status !== "CANCELLED" && job.invoiceId) await voidUnpaidInvoice(client, job);
   if (status === "COMPLETED" && job.status !== "COMPLETED") await notify({ type: "JOB_COMPLETED", title: `Job ${job.ref} completed`, link: `/jobs/${jobId}` }, client);
   return client.job.update({ where: { id: jobId }, data: {
     status, completedAt: status === "COMPLETED" ? job.completedAt ?? now : null,

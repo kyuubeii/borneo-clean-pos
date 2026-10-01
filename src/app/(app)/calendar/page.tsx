@@ -202,7 +202,9 @@ function MonthView({ from, anchor, jobs, onPick, onMore }: any) {
           const inMonth = d.getMonth() === anchor.getMonth();
           const today = sameDay(d, new Date());
           const cell = jobs.filter((j: any) => sameDay(new Date(j.scheduledAt), d));
-          const revenue = cell.reduce((a: number, j: any) => a + j.revenueCents, 0);
+          // A cancelled job stays on the calendar, struck through, but earns nothing,
+          // so the day's figure matches the sales in the reports.
+          const revenue = cell.filter((j: any) => j.status !== "CANCELLED").reduce((a: number, j: any) => a + j.revenueCents, 0);
           return (
             <div key={d.toISOString()} onDoubleClick={() => onPick(d)}
               className={`min-h-[92px] border-b border-l border-ink-50 p-1.5 ${inMonth ? "" : "bg-ink-50/40"}`}>

@@ -6,6 +6,13 @@ import { startOfDay, endOfDay, startOfMonth, endOfMonth, addDays, isoDate } from
 import { invoiceTotals } from "./finance";
 import { jobLabour } from "../labour";
 
+/**
+ * Expenses that count as a cost. One booked against a job that was then
+ * cancelled does not: in this business a cancelled job carries neither income
+ * nor cost. Expenses with no job always count.
+ */
+export const countedExpense = { NOT: { job: { is: { status: "CANCELLED" } } } };
+
 function range(from?: string, to?: string) {
   const gte = from ? startOfDay(new Date(from)) : startOfMonth(new Date());
   const lte = to ? endOfDay(new Date(to)) : endOfMonth(new Date());
@@ -34,7 +41,7 @@ defineAction({
     const [revenue, invoices, expenses, jobs, newCustomers] = await Promise.all([
       revenueIn(gte, lte),
       db.invoice.findMany({ where: { issuedAt: { gte, lte }, status: { not: "VOID" } }, include: { items: true, payments: true } }),
-      db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte } } }),
+      db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte }, ...countedExpense } }),
       db.job.findMany({ where: { scheduledAt: { gte, lte } }, include: { assignments: { include: { staff: true } }, timeEntries: true } }),
       db.customer.count({ where: { createdAt: { gte, lte } } }),
     ]);
@@ -51,7 +58,8 @@ defineAction({
     // Profit must compare like with like: expenses are recorded on the date they are
     // incurred, so revenue has to be sales earned, not cash collected. Mixing the two
     // (cash in vs accrued costs) understates profit whenever customers pay late.
-    const salesCents = jobs.filter((j) => j.status !== "CANCELLED").reduce((a, j) => a + j.revenueCents, 0);
+    const live = jobs.filter((j) => j.status !== "CANCELLED");
+    const salesCents = live.reduce((a, j) => a + j.revenueCents, 0);
     const profit = salesCents - expenseCents - labour - materialCents;
     return {
       from: gte, to: lte,
@@ -62,7 +70,9 @@ defineAction({
       jobsScheduled: jobs.length, jobsCompleted: jobs.filter((j) => j.status === "COMPLETED").length,
       jobsCancelled: jobs.filter((j) => j.status === "CANCELLED").length,
       newCustomers,
-      avgJobValueCents: jobs.length ? Math.round(jobs.reduce((a, j) => a + j.revenueCents, 0) / jobs.length) : 0,
+      // Over the jobs that count as sales: a cancelled job earned nothing, so it
+      // must not pull the average about either.
+      avgJobValueCents: live.length ? Math.round(salesCents / live.length) : 0,
     };
   },
 });
@@ -174,7 +184,7 @@ defineAction({
   input: z.object({ from: z.string().optional(), to: z.string().optional() }),
   handler: async ({ from, to }) => {
     const { gte, lte } = range(from, to);
-    const rows = await db.expense.findMany({ where: { spentAt: { gte, lte } }, include: { category: true } });
+    const rows = await db.expense.findMany({ where: { spentAt: { gte, lte }, ...countedExpense }, include: { category: true } });
     const map = new Map<string, { category: string; count: number; amountCents: number }>();
     for (const e of rows) {
       const name = e.category?.name ?? "Uncategorised";
@@ -199,7 +209,7 @@ defineAction({
         include: { customer: true, assignments: { include: { staff: true } } }, orderBy: { scheduledAt: "asc" } }),
       revenueIn(gte, lte),
       db.booking.count({ where: { createdAt: { gte, lte } } }),
-      db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte } } }),
+      db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte }, ...countedExpense } }),
       db.invoice.findMany({ where: { dueAt: { lt: new Date() }, status: { in: ["SENT", "PARTIAL", "OVERDUE"] } },
         include: { items: true, payments: true } }),
     ]);

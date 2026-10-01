@@ -21,6 +21,12 @@ export function businessClock(d: Date) {
   const [dd, mm, yyyy] = part({ day: "2-digit", month: "2-digit", year: "numeric" }).split("/");
   return { date: `${yyyy}-${mm}-${dd}`, time: part({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" }), weekday: part({ weekday: "long" }) };
 }
+/**
+ * The instant a day on the Kuching clock begins, `days` after the given
+ * Kuching date. Kuching has no daylight saving, so it is always UTC+8.
+ */
+export const businessDayStart = (date: string, days = 0) =>
+  new Date(new Date(`${date}T00:00:00+08:00`).getTime() + days * 86400000);
 export const toInput = (d: Date) => {
   const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;

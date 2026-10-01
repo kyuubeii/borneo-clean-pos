@@ -15,7 +15,7 @@ const MODELS = [
  * shown only by the input was never in the form state, so pressing Save wrote
  * nothing and the field read as empty the next time the page was opened.
  */
-const DEFAULTS: Record<string, string> = { "invoice.taxRateBp": "0", "invoice.dueDays": "14" };
+const DEFAULTS: Record<string, string> = { "invoice.taxRateBp": "0", "invoice.dueDays": "14", "reminders.days": "1" };
 
 export default function Settings() {
   const t = useT();
@@ -142,11 +142,12 @@ export default function Settings() {
 
       <Card title="Notifications">
         <p className="text-xs text-ink-400">Notifications are delivered in-app. Email and SMS delivery are not configured in this version.</p>
-        {[["notify.bookingConfirmation","Booking confirmations"],["notify.reminders","Job and schedule reminders"],["notify.paymentReminders","Payment reminders"]].map(([k, label]) => (
+        {[["notify.bookingConfirmation","Booking confirmations"],["notify.paymentReminders","Payment reminders"]].map(([k, label]) => (
           <label key={k} className="flex items-center gap-2 text-sm text-ink-600">
             <input type="checkbox" checked={f[k] === "true"} onChange={set(k)} /> {label}
           </label>
         ))}
+        <ReminderDays value={f["reminders.days"] ?? ""} onChange={(v) => setValue("reminders.days", v)} />
       </Card>
 
       <Card title="AI Assistant">
@@ -202,6 +203,32 @@ function LogoField({ value, onChange, onClear, onUpload, busy }: {
         </div>
       </div>
     </Field>
+  );
+}
+
+/**
+ * Booking reminders: which lead times are on, stored as "1,3". Sent once a day
+ * at about 8am to the bell, and to phones that have reminders switched on.
+ */
+function ReminderDays({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const on = new Set(value.split(",").filter(Boolean));
+  const toggle = (d: string) => {
+    const next = new Set(on);
+    if (next.has(d)) next.delete(d); else next.add(d);
+    onChange(["1", "3"].filter((x) => next.has(x)).join(","));
+  };
+  return (
+    <div className="space-y-1.5 border-t border-ink-100 pt-3">
+      <p className="text-sm font-medium text-ink-700">Booking reminders</p>
+      <p className="text-xs text-ink-400">Sent each morning at about 8am for upcoming bookings. Tick both for two reminders, or neither to turn them off.</p>
+      <div className="flex flex-wrap gap-4">
+        {[["1", "1 day before"], ["3", "3 days before"]].map(([d, label]) => (
+          <label key={d} className="flex items-center gap-2 text-sm text-ink-600">
+            <input type="checkbox" checked={on.has(d)} onChange={() => toggle(d)} /> {label}
+          </label>
+        ))}
+      </div>
+    </div>
   );
 }
 

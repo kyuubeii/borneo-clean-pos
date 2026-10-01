@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Stat, Badge, Money, Empty, LoadError } from "@/components/ui";
+import { useAction, Stat, Badge, Money, Empty, LoadError, MonthPicker } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import StaffDashboard from "@/components/StaffDashboard";
 import { useIsStaff } from "@/components/UserProvider";
@@ -19,7 +19,13 @@ export default function Dashboard() {
 function OwnerDashboard() {
   const t = useT();
   const today = new Date();
-  const monthFrom = isoDate(startOfMonth(today)), monthTo = isoDate(endOfMonth(today));
+  // The month the sales figures and the revenue chart cover. Today's jobs,
+  // what is owed, upcoming bookings and activity are always about now.
+  const [month, setMonth] = useState(() => startOfMonth(today));
+  const monthFrom = isoDate(startOfMonth(month)), monthTo = isoDate(endOfMonth(month));
+  const isThisMonth = month.getFullYear() === today.getFullYear() && month.getMonth() === today.getMonth();
+  const monthName = month.toLocaleDateString("en-MY", { month: "short", year: "numeric" });
+  const inMonth = (thisMonthKey: string, key: string) => isThisMonth ? t(thisMonthKey) : `${t(key)} · ${monthName}`;
 
   const brief = useAction<any>("reports.dailyBriefing", {});
   const summary = useAction<any>("reports.summary", { from: monthFrom, to: monthTo });
@@ -55,17 +61,19 @@ function OwnerDashboard() {
         </>
       } />
 
+      <div className="flex justify-end"><MonthPicker value={month} onChange={setMonth} thisMonthLabel={t("dash.thisMonth")} /></div>
+
       <LoadError error={summary.error ?? outstanding.error} onRetry={() => { summary.refresh(); outstanding.refresh(); brief.refresh(); trend.refresh(); }} />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label={t("dash.salesMonth")} value={figure(summary, (d) => <Money cents={d.salesCents} />)}
+        <Stat label={inMonth("dash.salesMonth", "dash.sales")} value={figure(summary, (d) => <Money cents={d.salesCents} />)}
           sub={s && <>{t("dash.collected")} <Money cents={s.revenueCollectedCents} /> · {t("dash.profit")} <Money cents={s.profitCents} /> ({s.marginPct}%)</>}
           tone={!s ? "default" : s.profitCents >= 0 ? "good" : "bad"} />
         <Stat label={t("dash.outstanding")} value={figure(outstanding, (d) => <Money cents={d.totalOutstandingCents} />)}
           sub={o && `${o.openInvoices} open · ${o.overdueInvoices} ${t("dash.overdueInvoices")}`}
           tone={o && o.overdueCents > 0 ? "warn" : "default"} />
-        <Stat label={t("dash.jobsThisMonth")} value={figure(summary, (d) => d.jobsScheduled)}
-          sub={s && `${s.jobsCompleted} ${t("dash.completed").toLowerCase()}`} />
+        <Stat label={inMonth("dash.jobsThisMonth", "dash.jobs")} value={figure(summary, (d) => d.jobsScheduled)}
+          sub={s && `${s.jobsCompleted} ${t("dash.completed").toLowerCase()}${s.jobsCancelled ? ` · ${s.jobsCancelled} ${t("job.status.CANCELLED").toLowerCase()}` : ""}`} />
         <Stat label={t("dash.avgJob")} value={figure(summary, (d) => <Money cents={d.avgJobValueCents} />)}
           sub={s && `${s.newCustomers} ${t("dash.newCustomers").toLowerCase()}`} />
       </div>
@@ -131,7 +139,7 @@ function OwnerDashboard() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="card lg:col-span-2">
-          <div className="border-b border-ink-100 px-4 py-3"><p className="section-title">{t("dash.revenueMonth")}</p></div>
+          <div className="border-b border-ink-100 px-4 py-3"><p className="section-title">{inMonth("dash.revenueMonth", "dash.revenue")}</p></div>
           <div className="p-4"><Sparkline data={trend.data ?? []} /></div>
         </div>
         <div className="card">

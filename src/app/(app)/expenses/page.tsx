@@ -22,7 +22,8 @@ export default function Expenses() {
   // Net of reimbursements already paid back, not the gross of every advance.
   const advances = useAction<any[]>("staff.advances", {});
 
-  const total = (data ?? []).reduce((a, e) => a + e.amountCents, 0);
+  // An expense on a cancelled job stays listed but is not a cost, as in the reports.
+  const total = (data ?? []).filter((e) => !e.jobCancelled).reduce((a, e) => a + e.amountCents, 0);
   const pendingReimb = (data ?? []).filter((e) => e.reimbursable && !e.reimbursed);
   const owedTotal = (advances.data ?? []).reduce((a: number, x: any) => a + x.stillOwedCents, 0);
 
@@ -77,8 +78,11 @@ export default function Expenses() {
                         {e.note && <span className="ml-1 text-[11px] text-ink-400">{e.note}</span>}
                         {e.receiptUrl && <a href={e.receiptUrl} target="_blank" rel="noreferrer" className="ml-1.5 text-[11px] text-brand-600 hover:underline">receipt</a>}
                       </td>
-                      <td className="td text-ink-500">{e.jobRef ?? "—"}</td>
-                      <td className="td text-right font-medium"><Money cents={e.amountCents} /></td>
+                      <td className="td text-ink-500">
+                        {e.jobRef ?? "—"}
+                        {e.jobCancelled && <span className="ml-1.5 badge bg-red-50 text-red-500" title="The job was cancelled, so this is not counted as a cost">cancelled · not counted</span>}
+                      </td>
+                      <td className={`td text-right font-medium ${e.jobCancelled ? "text-ink-300 line-through" : ""}`}><Money cents={e.amountCents} /></td>
                       <td className="td">
                         <div className="flex items-center justify-end gap-1.5">
                           {e.reimbursable && (e.reimbursed

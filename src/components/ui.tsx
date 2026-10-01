@@ -83,6 +83,40 @@ export function Stat({ label, value, sub, tone = "default" }: { label: string; v
   );
 }
 
+/* ------------------------------ Month picker ------------------------------ */
+/**
+ * ‹ September 2026 › — steps a month at a time. `value` is any date in the
+ * month shown; `onChange` gets the first of the new month. "This month" comes
+ * back once you have stepped away from it.
+ */
+export function MonthPicker({ value, onChange, thisMonthLabel = "This month" }: { value: Date; onChange: (d: Date) => void; thisMonthLabel?: string }) {
+  const first = new Date(value.getFullYear(), value.getMonth(), 1);
+  const now = new Date();
+  const isCurrent = first.getFullYear() === now.getFullYear() && first.getMonth() === now.getMonth();
+  const step = (n: number) => onChange(new Date(first.getFullYear(), first.getMonth() + n, 1));
+  const p = (n: number) => String(n).padStart(2, "0");
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <div className="inline-flex items-center rounded-lg border border-ink-200 bg-white">
+        <button type="button" onClick={() => step(-1)} aria-label="Previous month" className="px-2.5 py-1.5 text-ink-500 hover:bg-ink-50">‹</button>
+        {/* The native month field doubles as the label, so a far-off month is one tap away. */}
+        <label className="relative border-x border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-700 hover:bg-ink-50">
+          {first.toLocaleDateString("en-MY", { month: "long", year: "numeric" })}
+          <input type="month" aria-label="Choose month" value={`${first.getFullYear()}-${p(first.getMonth() + 1)}`}
+            onClick={(e) => { try { e.currentTarget.showPicker(); } catch { /* not every browser has one */ } }}
+            onChange={(e) => { const [y, m] = e.target.value.split("-").map(Number); if (y && m) onChange(new Date(y, m - 1, 1)); }}
+            className="absolute inset-0 cursor-pointer opacity-0" />
+        </label>
+        <button type="button" onClick={() => step(1)} aria-label="Next month" className="px-2.5 py-1.5 text-ink-500 hover:bg-ink-50">›</button>
+      </div>
+      {!isCurrent && (
+        <button type="button" onClick={() => onChange(new Date(now.getFullYear(), now.getMonth(), 1))}
+          className="text-xs font-medium text-brand-600 hover:underline">{thisMonthLabel}</button>
+      )}
+    </div>
+  );
+}
+
 export function Empty({ text }: { text: string }) {
   return <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-ink-200">

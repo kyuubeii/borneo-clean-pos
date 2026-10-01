@@ -27,6 +27,8 @@ try {
   run("prisma", ["db", "push", "--schema", schemaPath, "--skip-generate"]);
   run("tsx", ["scripts/polish.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/push.test.ts"], { POLISH_TEST_CLIENT: clientPath });
+  run("tsx", ["scripts/reminders.test.ts"], { POLISH_TEST_CLIENT: clientPath });
+  run("tsx", ["scripts/cancel.test.ts"], { POLISH_TEST_CLIENT: clientPath });
 } finally {
   rmSync(schemaPath, { force: true });
   rmSync(scratch, { recursive: true, force: true });

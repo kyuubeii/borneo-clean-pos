@@ -1,13 +1,13 @@
 "use client";
 import { useState } from "react";
 import { useT } from "@/components/I18nProvider";
-import { useAction, Money, Empty, Stat } from "@/components/ui";
+import { useAction, Money, Empty, Stat, MonthPicker } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import { startOfMonth, endOfMonth, addDays, addMonths, fmtDate, isoDate } from "@/lib/dates";
 
+/** "month" is whichever month the picker shows; the others run back from today. */
 const PRESETS = [
-  { key: "month", label: "This month", from: () => startOfMonth(new Date()), to: () => endOfMonth(new Date()) },
-  { key: "last", label: "Last month", from: () => startOfMonth(addMonths(new Date(), -1)), to: () => endOfMonth(addMonths(new Date(), -1)) },
+  { key: "month", label: "Month" },
   { key: "90", label: "Last 90 days", from: () => addDays(new Date(), -90), to: () => new Date() },
   { key: "year", label: "Last 12 months", from: () => addMonths(new Date(), -12), to: () => new Date() },
 ];
@@ -15,8 +15,10 @@ const PRESETS = [
 export default function Reports() {
   const t = useT();
   const [preset, setPreset] = useState("month");
+  const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const p = PRESETS.find((x) => x.key === preset)!;
-  const from = isoDate(p.from()), to = isoDate(p.to());
+  const fromD = p.from ? p.from() : startOfMonth(month), toD = p.to ? p.to() : endOfMonth(month);
+  const from = isoDate(fromD), to = isoDate(toD);
   const long = preset === "year";
 
   const summary = useAction<any>("reports.summary", { from, to });
@@ -30,8 +32,9 @@ export default function Reports() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title={t("nav.reports")} subtitle={`${fmtDate(p.from())} — ${fmtDate(p.to())}`} actions={
+      <PageHeader title={t("nav.reports")} subtitle={`${fmtDate(fromD)} — ${fmtDate(toD)}`} actions={
         <>
+          {preset === "month" && <MonthPicker value={month} onChange={setMonth} thisMonthLabel={t("dash.thisMonth")} />}
           <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 text-xs font-medium">
             {PRESETS.map((x) => (
               <button key={x.key} onClick={() => setPreset(x.key)}
