@@ -42,7 +42,9 @@ defineAction({
       revenueIn(gte, lte),
       db.invoice.findMany({ where: { issuedAt: { gte, lte }, status: { not: "VOID" } }, include: { items: true, payments: true } }),
       db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte }, ...countedExpense } }),
-      db.job.findMany({ where: { scheduledAt: { gte, lte } }, include: { assignments: { include: { staff: true } }, timeEntries: true } }),
+      db.job.findMany({ where: { scheduledAt: { gte, lte } }, include: {
+        assignments: { include: { staff: true } }, timeEntries: true, invoice: { include: { items: true, payments: true } },
+      } }),
       db.customer.count({ where: { createdAt: { gte, lte } } }),
     ]);
     const invoiced = invoices.reduce((a, i) => a + invoiceTotals(i).total, 0);
@@ -61,10 +63,22 @@ defineAction({
     const live = jobs.filter((j) => j.status !== "CANCELLED");
     const salesCents = live.reduce((a, j) => a + j.revenueCents, 0);
     const profit = salesCents - expenseCents - labour - materialCents;
+    // Still owed on the work done in the period: what is unpaid on its invoices
+    // (each invoice once, however many jobs it bills), plus finished jobs that
+    // were never invoiced. This used to be sales less cash collected in the same
+    // period, which nets late payments for last month against this month's
+    // unpaid work -- September read RM 0 owing with RM 350 unpaid.
+    const owed = new Map<string, number>();
+    let unbilledCents = 0;
+    for (const j of done) {
+      if (!j.invoice) unbilledCents += j.revenueCents;
+      else if (j.invoice.status !== "VOID") owed.set(j.invoice.id, Math.max(0, invoiceTotals(j.invoice).balance));
+    }
+    const outstandingCents = unbilledCents + [...owed.values()].reduce((a, v) => a + v, 0);
     return {
       from: gte, to: lte,
       salesCents, revenueCollectedCents: revenue, invoicedCents: invoiced,
-      outstandingCents: Math.max(0, salesCents - revenue),
+      outstandingCents, unbilledCents,
       expenseCents, labourCents: labour, materialCents, totalCostCents: expenseCents + labour + materialCents, profitCents: profit,
       marginPct: salesCents > 0 ? +((profit / salesCents) * 100).toFixed(1) : 0,
       jobsScheduled: jobs.length, jobsCompleted: jobs.filter((j) => j.status === "COMPLETED").length,

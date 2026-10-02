@@ -8,6 +8,7 @@ import { defineAction, ActionError } from "../registry";
 import { startOfDay, endOfDay, fmtStamp } from "../dates";
 import { notify } from "../notify";
 import { isUploadedFileUrl } from "../storage";
+import { assertOwnJob, STAFF_STATUSES } from "../access";
 
 const JOB_INCLUDE = {
   customer: true, address: true,
@@ -58,7 +59,15 @@ defineAction({
     if (ctx.user.role === "STAFF" && !(j as any).assignments.some((a: any) => a.staffId === ctx.user.staffId)) {
       throw new ActionError("You are not assigned to this job");
     }
-    return j;
+    if (ctx.user.role !== "STAFF") return j;
+    // A cleaner sees who they work with and what the job is charged at (they
+    // may be collecting it), but not what anyone is paid, nor the invoice and
+    // the expenses booked against the job: those stay with the office.
+    const person = (s: any) => s && ({ id: s.id, name: s.name, colour: s.colour });
+    const x: any = j;
+    return { ...x, expenses: [], invoice: null,
+      assignments: x.assignments.map((a: any) => ({ ...a, labourCents: undefined, staff: person(a.staff) })),
+      timeEntries: x.timeEntries.map((t: any) => ({ ...t, staff: person(t.staff) })) };
   },
 });
 
@@ -67,7 +76,15 @@ defineAction({
   description: "Change a job's status. Setting COMPLETED stamps the completion time and closes any open check-ins.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), status: z.enum(["SCHEDULED", "EN_ROUTE", "IN_PROGRESS", "COMPLETED", "CANCELLED"]) }),
-  handler: async ({ jobId, status }) => scheduleWrite(async (db) => setJobStatus(db, jobId, status)),
+  handler: async ({ jobId, status }, ctx) => scheduleWrite(async (db) => {
+    if (ctx.user.role === "STAFF") {
+      await assertOwnJob(ctx, jobId, db);
+      const job = await db.job.findUnique({ where: { id: jobId }, select: { status: true } });
+      if (!STAFF_STATUSES.includes(status)) throw new ActionError("Only the office can cancel or reschedule a job.");
+      if (job && ["COMPLETED", "CANCELLED"].includes(job.status)) throw new ActionError("This job is closed. Ask the office to reopen it.");
+    }
+    return setJobStatus(db, jobId, status);
+  }),
 });
 
 defineAction({
@@ -114,6 +131,9 @@ defineAction({
   handler: async ({ jobId, ...data }, ctx) => scheduleWrite(async (db) => {
     // Costing is money, and cleaners do not see job costing at all.
     if (ctx.user.role === "STAFF" && data.materialCostCents !== undefined) throw new ActionError("Only an owner or admin can change a job's costs.");
+    // The length of a visit moves the schedule, which is the office's to change.
+    if (ctx.user.role === "STAFF" && data.durationMin !== undefined) throw new ActionError("Only the office can change how long a job takes.");
+    await assertOwnJob(ctx, jobId, db);
     const job = await db.job.findUnique({ where: { id: jobId }, include: { assignments: true } });
     if (!job) throw new ActionError("Job not found");
     if (data.durationMin !== undefined && data.durationMin !== job.durationMin) {
@@ -129,7 +149,8 @@ defineAction({
   description: "Replace a job's checklist items.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), items: z.array(z.string()) }),
-  handler: async ({ jobId, items }) => {
+  handler: async ({ jobId, items }, ctx) => {
+    await assertOwnJob(ctx, jobId);
     await db.checklistItem.deleteMany({ where: { jobId } });
     if (items.length) await db.checklistItem.createMany({ data: items.map((label, sort) => ({ jobId, label, sort })) });
     return db.checklistItem.findMany({ where: { jobId }, orderBy: { sort: "asc" } });
@@ -141,7 +162,12 @@ defineAction({
   description: "Tick or untick a single checklist item on a job.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ itemId: z.string(), done: z.boolean() }),
-  handler: async ({ itemId, done }) => db.checklistItem.update({ where: { id: itemId }, data: { done } }),
+  handler: async ({ itemId, done }, ctx) => {
+    const item = await db.checklistItem.findUnique({ where: { id: itemId }, select: { jobId: true } });
+    if (!item) throw new ActionError("That checklist item no longer exists. Refresh and try again.");
+    await assertOwnJob(ctx, item.jobId);
+    return db.checklistItem.update({ where: { id: itemId }, data: { done } });
+  },
 });
 
 defineAction({
@@ -153,9 +179,10 @@ defineAction({
     url: z.string().url("A photo URL must be a full https:// address returned by the uploader"),
     kind: z.enum(["BEFORE", "AFTER", "ATTACHMENT"]).default("BEFORE"), caption: z.string().optional(),
   }),
-  handler: async (i) => {
+  handler: async (i, ctx) => {
     const job = await db.job.findUnique({ where: { id: i.jobId }, select: { id: true } });
     if (!job) throw new ActionError("Job not found");
+    await assertOwnJob(ctx, i.jobId);
     // Anything but a file this app uploaded renders as a broken image and can
     // never be fixed, because the picture was never ours to serve. A plain
     // http:// address is also blocked by the browser on an https page.

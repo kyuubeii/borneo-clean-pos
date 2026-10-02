@@ -5,6 +5,7 @@ import { optionalId, nullableId, optionalText, clearableText } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { totals, syncInvoiceStatus, fmt } from "../money";
 import { setReceipts } from "../notify";
+import { assertOwnJob } from "../access";
 
 const ADMIN = ["OWNER", "ADMIN"] as const;
 
@@ -107,7 +108,8 @@ defineAction({
   description: "Add a single item to a job's checklist without replacing the existing ones.",
   category: "Jobs", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), label: z.string().min(1) }),
-  handler: async ({ jobId, label }) => {
+  handler: async ({ jobId, label }, ctx) => {
+    await assertOwnJob(ctx, jobId);
     const n = await db.checklistItem.count({ where: { jobId } });
     return db.checklistItem.create({ data: { jobId, label, sort: n } });
   },
@@ -292,13 +294,21 @@ defineAction({
     dueAt: z.string().optional(), notes: z.string().optional(),
   }),
   handler: async ({ invoiceId, items, dueAt, ...rest }) => {
-    const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { payments: true } });
+    const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { payments: true, items: true, jobs: { select: { id: true } } } });
     if (!inv) throw new ActionError("Invoice not found");
     if (items && inv.payments.length) throw new ActionError(`Invoice ${inv.ref} already has payments against it, so its line items are fixed. Void it and raise a new one instead.`);
+    // The job's revenue is what Sales reads, so it has to follow the bill. An
+    // invoice for one job carries its new total onto that job; one that bills
+    // several cannot say how to split a change, so its amount is changed job by job.
+    const before = totals(inv.items, inv.discountCents, inv.taxRateBp).total;
+    const after = totals(items ?? inv.items, rest.discountCents ?? inv.discountCents, rest.taxRateBp ?? inv.taxRateBp).total;
+    if (after !== before && inv.jobs.length > 1)
+      throw new ActionError(`Invoice ${inv.ref} bills ${inv.jobs.length} jobs, so its total cannot change here. Change each job's amount instead.`);
     if (items) {
       await db.invoiceItem.deleteMany({ where: { invoiceId } });
       await db.invoiceItem.createMany({ data: items.map((i) => ({ ...i, invoiceId })) });
     }
+    if (after !== before && inv.jobs.length === 1) await db.job.update({ where: { id: inv.jobs[0].id }, data: { revenueCents: after } });
     return db.invoice.update({ where: { id: invoiceId },
       data: { ...rest, ...(dueAt ? { dueAt: new Date(dueAt) } : {}) },
       include: { items: true, customer: true } });

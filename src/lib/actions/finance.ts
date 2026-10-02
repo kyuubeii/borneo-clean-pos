@@ -257,6 +257,9 @@ defineAction({
   handler: async (i) => {
     const inv = await db.invoice.findUnique({ where: { id: i.invoiceId }, include: { items: true, payments: true, customer: true } });
     if (!inv) throw new ActionError("Invoice not found");
+    // Money taken against a voided invoice would count as takings for a bill
+    // that no longer exists. The screens hide the button; this stops the assistant too.
+    if (inv.status === "VOID") throw new ActionError(`Invoice ${inv.ref} is void. Set it back to Sent first, or raise a new invoice.`);
     const before = invoiceTotals(inv);
     if (i.amountCents > before.balance) throw new ActionError(`Payment exceeds the outstanding balance of ${(before.balance/100).toFixed(2)}`);
     const p = await db.payment.create({ data: {
@@ -278,6 +281,9 @@ defineAction({
   handler: async (i) => {
     const inv = await db.invoice.findUnique({ where: { id: i.invoiceId }, include: { items: true, payments: true } });
     if (!inv) throw new ActionError("Invoice not found");
+    // Only money that came in can go back out; anything more would be invented.
+    const { paid } = invoiceTotals(inv);
+    if (i.amountCents > paid) throw new ActionError(`A refund cannot be more than what has been paid on ${inv.ref}: ${(Math.max(0, paid) / 100).toFixed(2)}.`);
     const p = await db.payment.create({ data: {
       ref: await nextRef("PAY", "payment"), invoiceId: i.invoiceId, customerId: inv.customerId,
       amountCents: i.amountCents, method: i.method, note: i.note, isRefund: true,

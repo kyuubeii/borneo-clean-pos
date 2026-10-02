@@ -29,6 +29,7 @@ try {
   run("tsx", ["scripts/push.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/reminders.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/cancel.test.ts"], { POLISH_TEST_CLIENT: clientPath });
+  run("tsx", ["scripts/access.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/clock.test.ts"], { TZ: "UTC" });
 } finally {
   rmSync(schemaPath, { force: true });

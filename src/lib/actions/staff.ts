@@ -2,6 +2,7 @@ import { availability } from "../scheduling";
 import { z } from "zod";
 import { db } from "../db";
 import { defineAction, ActionError } from "../registry";
+import { assertOwnJob, assertSelf } from "../access";
 import { startOfDay, endOfDay } from "../dates";
 
 defineAction({
@@ -9,10 +10,17 @@ defineAction({
   description: "List cleaners and staff with their pay setup and contact details.",
   category: "Staff", roles: ["OWNER", "ADMIN", "STAFF"], readOnly: true,
   input: z.object({ includeInactive: z.boolean().default(false) }),
-  handler: async ({ includeInactive }) => db.staff.findMany({
-    where: includeInactive ? {} : { active: true },
-    orderBy: { name: "asc" }, include: { availability: true },
-  }),
+  handler: async ({ includeInactive }, ctx) => {
+    const rows = await db.staff.findMany({
+      where: includeInactive ? {} : { active: true },
+      orderBy: { name: "asc" }, include: { availability: true },
+    });
+    // A cleaner sees who their colleagues are -- name and colour, for the
+    // calendar -- but not their pay, phone, email or notes.
+    if (ctx.user.role !== "STAFF") return rows;
+    return rows.map((s) => s.id === ctx.user.staffId ? s
+      : { id: s.id, name: s.name, colour: s.colour, active: s.active, userId: s.userId, availability: [] });
+  },
 });
 
 defineAction({
@@ -66,7 +74,14 @@ defineAction({
   description: "Check a cleaner in to a job, starting their time tracking.",
   category: "Staff", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), staffId: z.string() }),
-  handler: async ({ jobId, staffId }) => {
+  handler: async ({ jobId, staffId }, ctx) => {
+    assertSelf(ctx, staffId);
+    await assertOwnJob(ctx, jobId);
+    const job = await db.job.findUnique({ where: { id: jobId }, select: { status: true } });
+    if (!job) throw new ActionError("Job not found");
+    // Checking in used to set the job in progress whatever it was, which
+    // quietly reopened a cancelled or finished job.
+    if (["COMPLETED", "CANCELLED"].includes(job.status)) throw new ActionError("This job is closed, so there is nothing to check in to.");
     const open = await db.timeEntry.findFirst({ where: { jobId, staffId, endAt: null } });
     if (open) throw new ActionError("Already checked in to this job");
     await db.job.update({ where: { id: jobId }, data: { status: "IN_PROGRESS" } });
@@ -79,7 +94,8 @@ defineAction({
   description: "Check a cleaner out of a job, closing their open time entry.",
   category: "Staff", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({ jobId: z.string(), staffId: z.string(), note: z.string().optional() }),
-  handler: async ({ jobId, staffId, note }) => {
+  handler: async ({ jobId, staffId, note }, ctx) => {
+    assertSelf(ctx, staffId);
     const open = await db.timeEntry.findFirst({ where: { jobId, staffId, endAt: null }, orderBy: { startAt: "desc" } });
     if (!open) throw new ActionError("No open check-in found for this cleaner on this job");
     // A check-out seconds after the check-in is a mis-tap, not work. Storing it
@@ -100,7 +116,8 @@ defineAction({
   description: "Get a cleaner's completed jobs, hours worked and performance over a period.",
   category: "Staff", roles: ["OWNER", "ADMIN", "STAFF"], readOnly: true,
   input: z.object({ staffId: z.string(), from: z.string().optional(), to: z.string().optional() }),
-  handler: async ({ staffId, from, to }) => {
+  handler: async ({ staffId, from, to }, ctx) => {
+    assertSelf(ctx, staffId);
     const gte = from ? new Date(from) : new Date(Date.now() - 90 * 86400000);
     const lte = to ? new Date(to) : new Date();
     const entries = await db.timeEntry.findMany({ where: { staffId, startAt: { gte, lte } }, include: { job: true } });
