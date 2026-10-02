@@ -29,6 +29,16 @@
         "NEXT_DIST_DIR=.next-verify npx next dev -p 3102"
       ],
       "port": 3102
+    },
+    {
+      "// utc": "Runs like Vercel, on UTC, to check the server keeps to the Kuching clock. Port 3103, own dist dir.",
+      "name": "borneo-clean-utc",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "TZ=UTC NEXT_DIST_DIR=.next-utc npx next dev -p 3103"
+      ],
+      "port": 3103
     }
   ]
 }
