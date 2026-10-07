@@ -105,7 +105,7 @@ export default function Expenses() {
 
         {!isStaff && <div className="space-y-4">
         <div className="card">
-          <div className="border-b border-ink-100 px-4 py-3"><p className="section-title">Money advanced by staff</p></div>
+          <div className="border-b border-ink-100 px-4 py-3"><p className="section-title">{t("staff.owedTitle")}</p></div>
           <div className="divide-y divide-ink-50">
             {(advances.data ?? []).map((x: any) => (
               <div key={x.staffId} className="px-4 py-2.5">
@@ -116,13 +116,19 @@ export default function Expenses() {
                 <p className="mt-0.5 text-[11px] text-ink-400">
                   advanced <Money cents={x.advancedCents} /> · settled on rows <Money cents={x.clearedCents} /> · {x.entries} entries
                 </p>
+                {x.earnedCents > 0 && <p className="mt-0.5 text-[11px] text-ink-400">
+                  plus <Money cents={x.earnedCents} /> pay on completed jobs (driver fees){x.wagesPaidCents > 0 && <>, less <Money cents={x.wagesPaidCents} /> wages paid</>}
+                </p>}
+                {x.collectedCents > 0 && <p className="mt-0.5 text-[11px] text-ink-400">
+                  less <Money cents={x.collectedCents} /> customer payments {x.name} collected and kept
+                </p>}
                 {x.unallocatedCents > 0 && <p className="mt-0.5 text-[11px] text-ink-400">
                   of <Money cents={x.repaidCents} /> paid back, <Money cents={x.unallocatedCents} /> is not yet matched to rows —
                   ticking those rows records which advance it covered and will not change what is owed
                 </p>}
               </div>
             ))}
-            {!advances.data?.length && <p className="px-4 py-5 text-center text-xs text-ink-400">Nobody has advanced money</p>}
+            {!advances.data?.length && <p className="px-4 py-5 text-center text-xs text-ink-400">{t("staff.owedNone")}</p>}
           </div>
         </div>
         <div className="card">

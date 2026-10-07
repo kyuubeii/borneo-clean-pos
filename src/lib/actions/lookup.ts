@@ -24,7 +24,7 @@ defineAction({
       job: { customer: true, address: true, assignments: { include: { staff: true } }, checklist: true, invoice: true },
       invoice: { customer: true, items: true, payments: true, jobs: { select: { id: true, ref: true, scheduledAt: true, status: true, revenueCents: true } } },
       quote: { customer: true, items: true },
-      payment: { customer: true, invoice: true },
+      payment: { customer: true, invoice: true, receivedBy: { select: { name: true } } },
       expense: { category: true, job: true, staff: true },
       payout: { staff: true },
       capitalEntry: { from: true, to: true },

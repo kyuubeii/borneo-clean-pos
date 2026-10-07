@@ -79,7 +79,7 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
           <div className="divide-y divide-ink-50">
             {inv.payments.map((p: any) => (
               <div key={p.id} className="flex items-center justify-between px-4 py-2.5">
-                <div><p className="text-sm font-medium text-ink-800">{p.ref} <span className="font-normal text-ink-400">· {p.method}</span></p>
+                <div><p className="text-sm font-medium text-ink-800">{p.ref} <span className="font-normal text-ink-400">· {p.method}{p.receivedBy ? ` · ${t("pay.collectedBy")} ${p.receivedBy.name}` : ""}</span></p>
                   <p className="text-[11px] text-ink-400">{fmtDateTime(new Date(p.paidAt))}{p.note ? ` · ${p.note}` : ""}</p></div>
                 <Money cents={p.isRefund ? -p.amountCents : p.amountCents} className={`font-medium ${p.isRefund ? "text-red-600" : "text-emerald-600"}`} />
               </div>
@@ -156,14 +156,17 @@ function PayModal({ open, onClose, invoice, onDone }: any) {
   const [amount, setAmount] = useState((invoice.balance / 100).toFixed(2));
   const [method, setMethod] = useState("BANK");
   const [reference, setReference] = useState("");
+  // Empty means the owner received it; a cleaner's id means they collected it and keep it.
+  const [receivedById, setReceivedById] = useState("");
+  const staff = useAction<any[]>("staff.list", {});
   const [busy, setBusy] = useState(false);
-  useEffect(() => { if (open) { setAmount((invoice.balance / 100).toFixed(2)); setReference(""); } }, [open, invoice.id, invoice.balance]);
+  useEffect(() => { if (open) { setAmount((invoice.balance / 100).toFixed(2)); setReference(""); setReceivedById(""); } }, [open, invoice.id, invoice.balance]);
   async function go() {
     const cents = toCents(amount);
     if (cents <= 0 || cents > invoice.balance) return toast("Enter an amount greater than zero and no more than the balance", "err");
     setBusy(true);
     try {
-      await callAction("payments.record", { invoiceId: invoice.id, amountCents: toCents(amount), method, reference: reference || undefined });
+      await callAction("payments.record", { invoiceId: invoice.id, amountCents: toCents(amount), method, reference: reference || undefined, receivedById: receivedById || undefined });
       toast("Payment recorded"); onDone(); onClose();
     } catch (e: any) { toast(e.message, "err"); } finally { setBusy(false); }
   }
@@ -180,6 +183,12 @@ function PayModal({ open, onClose, invoice, onDone }: any) {
         <Field label="Method">
           <select className="input" value={method} onChange={(e) => setMethod(e.target.value)}>
             {["CASH","BANK","CARD","EWALLET","CHEQUE"].map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </Field>
+        <Field label={t("pay.receivedBy")} hint={receivedById ? t("pay.keptHint") : undefined}>
+          <select id="pay-received-by" className="input" value={receivedById} onChange={(e) => setReceivedById(e.target.value)}>
+            <option value="">{t("pay.me")}</option>
+            {(staff.data ?? []).map((s: any) => <option key={s.id} value={s.id}>{s.name}</option>)}
           </select>
         </Field>
         <Field label={`Reference (${t("common.optional")})`}><input className="input" value={reference} onChange={(e) => setReference(e.target.value)} /></Field>

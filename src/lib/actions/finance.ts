@@ -182,7 +182,8 @@ defineAction({
   category: "Invoices", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ invoiceId: z.string() }),
   handler: async ({ invoiceId }) => {
-    const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { customer: { include: { addresses: true } }, items: true, payments: true, jobs: true } });
+    const inv = await db.invoice.findUnique({ where: { id: invoiceId }, include: { customer: { include: { addresses: true } }, items: true, jobs: true,
+      payments: { include: { receivedBy: { select: { id: true, name: true } } } } } });
     if (!inv) throw new ActionError("Invoice not found");
     return { ...inv, ...invoiceTotals(inv) };
   },
@@ -335,16 +336,19 @@ defineAction({
 
 defineAction({
   name: "payments.record",
-  description: "Record a payment against an invoice. Supports partial payments; the invoice status updates automatically.",
+  description: "Record a payment against an invoice. Supports partial payments; the invoice status updates automatically. When a cleaner or driver collected the money from the customer (e.g. 'Jong collected it'), pass their staffId as receivedById: it then counts against what the business owes them. Leave it empty when the owner received the money.",
   category: "Payments", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
   input: z.object({
     invoiceId: z.string(),
     amountCents: z.number().int().min(1).describe("Amount received in cents, e.g. RM 250.00 is 25000"),
     method: z.enum(["CASH","BANK","CARD","EWALLET","CHEQUE"]).default("CASH"),
     reference: z.string().optional(), note: z.string().optional(), paidAt: z.string().optional(),
+    receivedById: optionalId().describe("Staff id of the cleaner or driver who collected it; omit when the owner received it"),
   }),
   handler: async (i) => {
     const inv = await db.invoice.findUnique({ where: { id: i.invoiceId }, include: { items: true, payments: true, customer: true } });
+    const collector = i.receivedById ? await db.staff.findUnique({ where: { id: i.receivedById }, select: { id: true, name: true } }) : null;
+    if (i.receivedById && !collector) throw new ActionError("That cleaner was not found. Pick them from the staff list.");
     if (!inv) throw new ActionError("Invoice not found");
     // Money taken against a voided invoice would count as takings for a bill
     // that no longer exists. The screens hide the button; this stops the assistant too.
@@ -354,10 +358,10 @@ defineAction({
     const p = await db.payment.create({ data: {
       ref: await nextRef("PAY", "payment"), invoiceId: i.invoiceId, customerId: inv.customerId,
       amountCents: i.amountCents, method: i.method, reference: i.reference, note: i.note,
-      paidAt: i.paidAt ? new Date(i.paidAt) : new Date(),
+      paidAt: i.paidAt ? new Date(i.paidAt) : new Date(), receivedById: collector?.id ?? null,
     } });
     const updated = await syncInvoiceStatus(i.invoiceId);
-    return { paymentRef: p.ref, invoiceRef: inv.ref, customer: inv.customer.name,
+    return { paymentRef: p.ref, invoiceRef: inv.ref, customer: inv.customer.name, collectedBy: collector?.name ?? null,
       amountCents: p.amountCents, remainingBalanceCents: before.balance - i.amountCents, invoiceStatus: updated?.status };
   },
 });
@@ -391,9 +395,9 @@ defineAction({
     const rows = await db.payment.findMany({
       where: { ...(customerId ? { customerId } : {}),
         ...(from || to ? { paidAt: { ...(from ? { gte: startOfDay(new Date(from)) } : {}), ...(to ? { lte: endOfDay(new Date(to)) } : {}) } } : {}) },
-      orderBy: { paidAt: "desc" }, take: limit, include: { customer: true, invoice: true },
+      orderBy: { paidAt: "desc" }, take: limit, include: { customer: true, invoice: true, receivedBy: { select: { name: true } } },
     });
-    return rows.map((p) => ({ id: p.id, ref: p.ref, customer: p.customer.name, invoiceRef: p.invoice?.ref,
+    return rows.map((p) => ({ id: p.id, ref: p.ref, customer: p.customer.name, invoiceRef: p.invoice?.ref, collectedBy: p.receivedBy?.name ?? null,
       amountCents: p.isRefund ? -p.amountCents : p.amountCents, method: p.method, paidAt: p.paidAt, isRefund: p.isRefund }));
   },
 });

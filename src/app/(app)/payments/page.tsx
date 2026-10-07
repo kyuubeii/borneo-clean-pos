@@ -43,7 +43,7 @@ export default function Payments() {
               <table className="w-full">
                 <thead className="sticky top-0 border-b border-ink-100 bg-ink-50/90 backdrop-blur">
                   <tr><th className="th">Ref</th><th className="th">{t("common.customer")}</th>
-                    <th className="th">{t("common.date")}</th><th className="th">Method</th>
+                    <th className="th">{t("common.date")}</th><th className="th">Method</th><th className="th">{t("pay.receivedBy")}</th>
                     <th className="th text-right">{t("common.amount")}</th>
                     {canDelete && <th className="th w-px"></th>}</tr>
                 </thead>
@@ -55,6 +55,7 @@ export default function Payments() {
                       <td className="td">{p.customer}</td>
                       <td className="td whitespace-nowrap text-ink-500">{fmtDateTime(new Date(p.paidAt))}</td>
                       <td className="td"><span className="badge bg-ink-100 text-ink-600">{p.method}</span></td>
+                      <td className="td text-ink-500">{p.collectedBy ?? t("pay.me")}</td>
                       <td className="td text-right font-medium"><Money cents={p.amountCents} className={p.amountCents < 0 ? "text-red-600" : "text-emerald-600"} /></td>
                       {canDelete && (
                         <td className="td text-right">

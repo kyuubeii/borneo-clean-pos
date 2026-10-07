@@ -97,17 +97,30 @@ defineAction({
 
 defineAction({
   name: "staff.advances",
-  description: "What the business still owes each person for expenses they paid out of their own pocket: total advanced, less what has been paid back. A reimbursement payout and a row marked reimbursed are two records of the same repayment, so the credit is the larger of the two rather than the sum.",
+  description: "What the business still owes each person: expenses they paid out of their own pocket plus their pay on completed jobs (e.g. Jong's driver fees, earnedCents), less what has been paid back. Paid back means reimbursement payouts, customer payments they collected and kept (collectedCents), and paid wage payouts. Rows marked reimbursed are a second record of the same repayment, so that credit is the larger of the two rather than the sum.",
   category: "Expenses", roles: ["OWNER", "ADMIN"], readOnly: true,
   input: z.object({ staffId: z.string().optional() }),
   handler: async ({ staffId }, ctx) => {
     // A cleaner only ever sees their own position.
     if (ctx.user.role === "STAFF") staffId = ctx.user.staffId ?? "__none__";
     const staff = await db.staff.findMany({ where: staffId ? { id: staffId } : {} });
+    // Customer money a worker collected and kept is money that went back to them.
+    // Counted from the payments themselves, so deleting or refunding one corrects this.
+    const kept = new Map<string, number>();
+    for (const p of await db.payment.findMany({ where: { receivedById: { in: staff.map((s) => s.id) } }, select: { receivedById: true, amountCents: true, isRefund: true } }))
+      kept.set(p.receivedById!, (kept.get(p.receivedById!) ?? 0) + (p.isRefund ? -p.amountCents : p.amountCents));
     const out = [];
     for (const s of staff) {
       const adv = await db.expense.findMany({ where: { staffId: s.id } });
-      if (!adv.length) continue;
+      const collected = kept.get(s.id) ?? 0;
+      // Their pay on completed jobs, from the same labourFor() as costing and payroll,
+      // less wage payouts already paid.
+      const jobs = await db.job.findMany({ where: { status: "COMPLETED", assignments: { some: { staffId: s.id } } },
+        include: { assignments: { where: { staffId: s.id }, include: { staff: true } }, timeEntries: { where: { staffId: s.id } } } });
+      const earned = jobs.reduce((x, j) => x + j.assignments.reduce((y, a) => y + labourFor(j, a, j.timeEntries).costCents, 0), 0);
+      const wagesPaid = (await db.payout.findMany({ where: { staffId: s.id, kind: "EARNINGS", status: "PAID" } }))
+        .reduce((a, p) => a + p.amountCents, 0);
+      if (!adv.length && !collected && !earned && !wagesPaid) continue;
       const advanced = adv.reduce((a, e) => a + e.amountCents, 0);
       // Two records of the same repayment: the payouts are the cash that went back, and
       // ticking a row says which advance that cash covered. Adding them would count the
@@ -115,10 +128,11 @@ defineAction({
       const cleared = adv.filter((e) => e.reimbursed).reduce((a, e) => a + e.amountCents, 0);
       const repaid = (await db.payout.findMany({ where: { staffId: s.id, kind: "REIMBURSEMENT", status: "PAID" } }))
         .reduce((a, p) => a + p.amountCents, 0);
-      const credit = Math.max(cleared, repaid);
+      const credit = Math.max(cleared, repaid + collected);
       out.push({ staffId: s.id, name: s.name, advancedCents: advanced, clearedCents: cleared,
-        repaidCents: repaid, unallocatedCents: Math.max(0, repaid - cleared),
-        stillOwedCents: advanced - credit, entries: adv.length });
+        repaidCents: repaid, collectedCents: collected, unallocatedCents: Math.max(0, repaid + collected - cleared),
+        earnedCents: earned, wagesPaidCents: wagesPaid,
+        stillOwedCents: advanced - credit + earned - wagesPaid, entries: adv.length });
     }
     return out.sort((a, b) => b.stillOwedCents - a.stillOwedCents);
   },
