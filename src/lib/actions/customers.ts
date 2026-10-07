@@ -5,6 +5,14 @@ import { defineAction, ActionError } from "../registry";
 
 const ALL = ["OWNER", "ADMIN"] as const;
 
+const TITLES = new Set(["mr", "mrs", "ms", "miss", "mdm", "madam", "dr", "encik", "en", "puan", "pn", "cik", "tuan", "dato", "datin", "auntie", "aunty", "uncle"]);
+/** The words of a customer search, without titles like Ms or Puan and their full stops. */
+export function searchWords(query?: string) {
+  const all = (query ?? "").replace(/[.,]/g, " ").split(/\s+/).filter(Boolean);
+  const words = all.filter((w) => !TITLES.has(w.toLowerCase()) && !/^(女士|小姐|先生|太太)$/.test(w));
+  return words.length ? words : all;
+}
+
 defineAction({
   name: "customers.search",
   description: "Search customers by name, email, phone or company. Returns matching customer profiles with their addresses. Use this first whenever a request names a customer.",
@@ -17,10 +25,13 @@ defineAction({
     // booking and quote forms both fill their dropdown from here. Matches how
     // staff.list and services.list already behave.
     const active = includeInactive ? {} : { active: true };
-    const where = query ? { ...active, OR: [
-      { name: { contains: query, mode: "insensitive" as const } }, { email: { contains: query, mode: "insensitive" as const } },
-      { phone: { contains: query, mode: "insensitive" as const } }, { company: { contains: query, mode: "insensitive" as const } },
-    ] } : active;
+    // Each word must match somewhere, so "Ms Sim" finds "Beautrix Sim 507" and
+    // "shirley bong" finds "Shirley Bong"; a title on its own is not a word to match.
+    const words = searchWords(query);
+    const where = words.length ? { ...active, AND: words.map((w) => ({ OR: [
+      { name: { contains: w, mode: "insensitive" as const } }, { email: { contains: w, mode: "insensitive" as const } },
+      { phone: { contains: w, mode: "insensitive" as const } }, { company: { contains: w, mode: "insensitive" as const } },
+    ] })) } : active;
     const rows = await db.customer.findMany({ where, take: limit, orderBy: { name: "asc" }, include: { addresses: true } });
     return rows.map((c) => ({ id: c.id, name: c.name, email: c.email, phone: c.phone, company: c.company, notes: c.notes,
       // The customers screen shows and toggles this, so it has to come back.

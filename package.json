@@ -16,7 +16,8 @@
     "audit": "tsx scripts/audit.ts",
     "catalogue": "tsx scripts/restore-catalogue.ts",
     "verify": "tsx scripts/verify-fixes.ts",
-    "test:polish": "node scripts/test-polish.mjs"
+    "test:polish": "node scripts/test-polish.mjs",
+    "eval:ai": "node scripts/test-polish.mjs --ai"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.1.0",

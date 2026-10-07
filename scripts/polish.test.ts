@@ -76,7 +76,11 @@ async function main() {
       assert.equal((await client.booking.findUnique({ where: { id: b.booking.id } })).durationMin, 120);
     });
     const q = await act("quotes.create", { customerId: c.id, items: [{ name: "Cleaning", serviceId: service.id, qty: 1, priceCents: 10000 }, { name: "Custom windows", qty: 2, priceCents: 2500 }], discountCents: 1000, taxRateBp: 600 });
-    await check("draft quote cannot be converted", async () => { await assert.rejects(act("quotes.convertToBooking", { quoteId: q.id, startAt: start }), /Accept/); });
+    await check("a declined quote cannot be converted", async () => {
+      await act("quotes.updateStatus", { quoteId: q.id, status: "DECLINED" });
+      await assert.rejects(act("quotes.convertToBooking", { quoteId: q.id, startAt: start }), /declined/);
+      await assert.rejects(act("quotes.convertToInvoice", { quoteId: q.id }), /declined/);
+    });
     await act("quotes.updateStatus", { quoteId: q.id, status: "ACCEPTED" });
     const converted = await act("quotes.convertToBooking", { quoteId: q.id, startAt: start });
     const qb = await client.booking.findUnique({ where: { ref: converted.bookingRef } });

@@ -4,8 +4,8 @@ import { db } from "../db";
 import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { nextRef } from "../ref";
-import { totals } from "../money";
-import { startOfDay, endOfDay, addDays } from "../dates";
+import { totals, syncInvoiceStatus as syncStatus } from "../money";
+import { startOfDay, endOfDay, addDays, businessClock } from "../dates";
 import { notify } from "../notify";
 
 /** Invoice balance after payments and refunds. */
@@ -75,7 +75,7 @@ defineAction({
 
 defineAction({
   name: "quotes.convertToBooking",
-  description: "Turn an accepted quote into a booking and job at a given date/time.",
+  description: "Turn a quote the customer has accepted into a booking and job at a given date/time. Use for 'they accepted the quote, book it for…'; the quote is marked accepted as part of this.",
   category: "Quotes", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
   input: z.object({ quoteId: z.string(), startAt: z.string().describe("ISO datetime for the visit") }),
   handler: async ({ quoteId, startAt }) => scheduleWrite(async (db) => {
@@ -87,7 +87,8 @@ defineAction({
       const prior = await db.booking.findUnique({ where: { id: q.convertedBookingId }, select: { ref: true } });
       if (prior) throw new ActionError(`This quote has already been converted into booking ${prior.ref}.`);
     }
-    if (q.status !== "ACCEPTED") throw new ActionError("Accept the quote before creating a booking.");
+    // Booking it is the customer accepting it; only a quote they turned down, or one past its date, is refused.
+    if (q.status === "DECLINED" || q.status === "EXPIRED") throw new ActionError(`Quote ${q.ref} is ${q.status.toLowerCase()}. Set it back to Sent first if the customer has changed their mind.`);
     const t = totals(q.items, q.discountCents, q.taxRateBp);
     const when = new Date(startAt);
     validSlot(when, 120);
@@ -111,7 +112,7 @@ defineAction({
 
 defineAction({
   name: "quotes.convertToInvoice",
-  description: "Bill an accepted quotation directly, without scheduling a visit first. Copies its line items, discount, tax and notes onto a new invoice. Use for 'invoice this quote'.",
+  description: "Bill a quotation directly, without scheduling a visit first. Copies its line items, discount, tax and notes onto a new invoice and marks the quote accepted. Use for 'invoice this quote'.",
   category: "Quotes", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
   input: z.object({ quoteId: z.string(), dueDays: z.number().int().min(0).default(14) }),
   handler: async ({ quoteId, dueDays }) => {
@@ -132,7 +133,7 @@ defineAction({
       const booking = await db.booking.findUnique({ where: { id: q.convertedBookingId }, select: { ref: true } });
       if (booking) throw new ActionError(`This quote is scheduled as booking ${booking.ref}. Invoice it from the completed job, so the work is not billed twice.`);
     }
-    if (q.status !== "ACCEPTED") throw new ActionError("Accept the quote before invoicing it.");
+    if (q.status === "DECLINED" || q.status === "EXPIRED") throw new ActionError(`Quote ${q.ref} is ${q.status.toLowerCase()}. Set it back to Sent first if the customer has changed their mind.`);
 
     const inv = await db.invoice.create({ data: {
       ref: await nextRef("INV", "invoice"), customerId: q.customerId, status: "SENT",
@@ -140,7 +141,7 @@ defineAction({
       notes: `Quotation reference: ${q.ref}${q.notes ? `\n${q.notes}` : ""}`,
       items: { create: q.items.map((i) => ({ name: i.name, qty: i.qty, priceCents: i.priceCents })) },
     }, include: { items: true } });
-    await db.quote.update({ where: { id: quoteId }, data: { convertedInvoiceId: inv.id } });
+    await db.quote.update({ where: { id: quoteId }, data: { status: "ACCEPTED", convertedInvoiceId: inv.id } });
     await notify({ type: "INVOICE", title: `Invoice ${inv.ref} raised`, body: `${q.customer.name} \u00b7 quote ${q.ref}`, link: `/invoices/${inv.id}` });
     return { invoiceId: inv.id, ref: inv.ref, quoteRef: q.ref, ...totals(inv.items, q.discountCents, q.taxRateBp) };
   },
@@ -240,6 +241,94 @@ defineAction({
   category: "Invoices", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
   input: z.object({ invoiceId: z.string(), status: z.enum(["DRAFT","SENT","PARTIAL","PAID","OVERDUE","VOID"]) }),
   handler: async ({ invoiceId, status }) => db.invoice.update({ where: { id: invoiceId }, data: { status } }),
+});
+
+/** "13 Aug 2026" on the Kuching calendar, for a line that names its visit. */
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** Visit days on the Kuching calendar, as compactly as they read: "27 Aug, 3, 10 Sep 2026". */
+export function visitDays(dates: Date[]) {
+  const days = [...new Set(dates.map((d) => businessClock(d).date))].sort().map((s) => s.split("-").map(Number));
+  const out: string[] = [];
+  days.forEach(([y, m, d], i) => {
+    const next = days[i + 1];
+    const endOfMonth = !next || next[0] !== y || next[1] !== m;
+    const endOfYear = !next || next[0] !== y;
+    out.push(`${d}${endOfMonth ? ` ${MONTHS[m - 1]}` : ""}${endOfYear ? ` ${y}` : ""}`);
+  });
+  return out.join(", ");
+}
+
+defineAction({
+  name: "invoices.merge",
+  description: "Combine two or more invoices for the SAME customer into one new invoice, e.g. 'put all of Ms Sim's unpaid invoices on one bill'. Every line, job and payment moves to the new invoice; the old invoices are voided with a note pointing to it, so no sale or collection changes. Find them first with invoices_list (customerId, unpaidOnly) and pass their refs or ids.",
+  category: "Invoices", roles: ["OWNER", "ADMIN"], requiresConfirm: true,
+  input: z.object({
+    invoices: z.array(z.string()).min(2).describe("Two or more invoice refs (INV-0042) or ids, all for the same customer"),
+    dueDays: z.number().int().min(0).default(14).describe("Days from today until the combined invoice is due"),
+    notes: z.string().optional(),
+  }),
+  handler: async ({ invoices, dueDays, notes }) => scheduleWrite(async (db) => {
+    const keys = invoices.map((k) => k.trim());
+    const wanted = [...new Set(keys.map((k) => k.toUpperCase()))];
+    if (wanted.length !== keys.length) throw new ActionError("The same invoice is listed twice.");
+    const found = await db.invoice.findMany({
+      where: { OR: [{ id: { in: keys } }, { ref: { in: keys.map((k) => k.toUpperCase()) } }] },
+      include: { items: true, payments: true, customer: { select: { name: true } }, jobs: { select: { id: true, ref: true, scheduledAt: true } } },
+    });
+    const missing = keys.filter((k) => !found.some((f: any) => f.id === k || f.ref === k.toUpperCase()));
+    if (missing.length) throw new ActionError(`No invoice found for ${missing.join(", ")}.`);
+    if (found.length < 2) throw new ActionError("Choose at least two different invoices to combine.");
+    if (new Set(found.map((f: any) => f.customerId)).size > 1)
+      throw new ActionError(`Only one customer's invoices can be combined. These belong to ${[...new Set(found.map((f: any) => f.customer.name))].join(" and ")}.`);
+    const voided = found.filter((f: any) => f.status === "VOID");
+    if (voided.length) throw new ActionError(`${voided.map((f: any) => f.ref).join(", ")} ${voided.length > 1 ? "are" : "is"} void and cannot be combined.`);
+    if (new Set(found.map((f: any) => f.taxRateBp)).size > 1) throw new ActionError("These invoices charge different tax rates, so they cannot share one invoice.");
+
+    // Oldest work first, so the combined bill reads like a statement.
+    const when = (f: any) => Math.min(...f.jobs.map((j: any) => j.scheduledAt.getTime()), f.issuedAt.getTime());
+    const sources = [...found].sort((a: any, b: any) => when(a) - when(b));
+    // The printed invoice is one A4 page, so the same service at the same price
+    // becomes one line with a quantity, named with the visit days it covers.
+    // Lines from an invoice that already covers several visits keep their name.
+    const groups = new Map<string, { name: string; qty: number; priceCents: number; days: Date[] }>();
+    for (const f of sources) for (const i of f.items) {
+      const day = f.jobs.length === 1 ? f.jobs[0].scheduledAt : null;
+      const key = `${i.name}\u0000${i.priceCents}\u0000${day ? "dated" : "as-is"}`;
+      const g = groups.get(key) ?? { name: i.name, qty: 0, priceCents: i.priceCents, days: [] as Date[] };
+      g.qty += i.qty;
+      if (day) g.days.push(day);
+      groups.set(key, g);
+    }
+    const items = [...groups.values()].map((g) => ({
+      name: g.days.length ? `${g.name} — ${visitDays(g.days)}` : g.name, qty: g.qty, priceCents: g.priceCents,
+    }));
+    const refs = sources.map((f: any) => f.ref);
+
+    const inv = await db.invoice.create({ data: {
+      ref: await nextRef("INV", "invoice", db), customerId: sources[0].customerId,
+      status: sources.every((f: any) => f.status === "DRAFT") ? "DRAFT" : "SENT",
+      discountCents: sources.reduce((a: number, f: any) => a + f.discountCents, 0), taxRateBp: sources[0].taxRateBp,
+      dueAt: addDays(new Date(), dueDays),
+      notes: [`Combines ${refs.join(", ")}.`, notes].filter(Boolean).join("\n"),
+      items: { create: items },
+    } });
+    const ids = sources.map((f: any) => f.id);
+    // Payments keep their own date, so what was collected in each month does not move.
+    await db.payment.updateMany({ where: { invoiceId: { in: ids } }, data: { invoiceId: inv.id } });
+    await db.job.updateMany({ where: { invoiceId: { in: ids } }, data: { invoiceId: inv.id } });
+    await db.quote.updateMany({ where: { convertedInvoiceId: { in: ids } }, data: { convertedInvoiceId: inv.id } });
+    // The old invoices stay, voided, so their refs still lead somewhere.
+    for (const f of sources) {
+      await db.invoice.update({ where: { id: f.id }, data: { status: "VOID",
+        notes: [f.notes, `Combined into ${inv.ref}.`].filter(Boolean).join("\n") } });
+    }
+    await syncStatus(db, inv.id);
+    const out = await db.invoice.findUnique({ where: { id: inv.id }, include: { items: true, payments: true } });
+    const t = invoiceTotals(out);
+    await notify({ type: "INVOICE", title: `Invoice ${inv.ref} combines ${refs.length} invoices`, body: `${sources[0].customer.name} · ${refs.join(", ")}`, link: `/invoices/${inv.id}` }, db);
+    return { invoiceId: inv.id, ref: inv.ref, customer: sources[0].customer.name, combined: refs, status: out.status,
+      totalCents: t.total, paidCents: t.paid, balanceCents: t.balance, lines: items.length };
+  }),
 });
 
 /* --------------------------------- Payments -------------------------------- */

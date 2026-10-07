@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { categoryIdFor } from "../categories";
 import { db } from "../db";
 import { optionalId, optionalText } from "../schema";
 import { defineAction, ActionError } from "../registry";
@@ -36,18 +37,14 @@ defineAction({
   category: "Expenses", roles: ["OWNER", "ADMIN", "STAFF"],
   input: z.object({
     amountCents: z.number().int().min(1).describe("Amount in cents, e.g. RM 120 is 12000"),
-    categoryName: optionalText().describe("Category name; created if it does not exist, e.g. Fuel, Supplies"),
+    categoryName: optionalText().describe("Category name. Use an existing one from expenses_categories when it fits (matched ignoring case); a new name creates a new category"),
     jobId: optionalId(), staffId: optionalId(),
     vendor: z.string().optional(), note: z.string().optional(),
     spentAt: z.string().optional().describe("ISO date; defaults to now"),
     reimbursable: z.boolean().default(false), receiptUrl: optionalText(),
   }),
   handler: async (i) => {
-    let categoryId: string | undefined;
-    if (i.categoryName) {
-      const c = await db.expenseCategory.upsert({ where: { name: i.categoryName }, update: {}, create: { name: i.categoryName } });
-      categoryId = c.id;
-    }
+    const categoryId = await categoryIdFor(i.categoryName);
     return db.expense.create({ data: {
       ref: await nextRef("EXP", "expense"), amountCents: i.amountCents, categoryId,
       jobId: i.jobId, staffId: i.staffId, vendor: i.vendor, note: i.note,

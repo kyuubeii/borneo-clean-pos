@@ -22,15 +22,22 @@ const run = (bin, args, extra = {}) => {
   const result = spawnSync(resolve("node_modules/.bin", bin), args, { stdio: "inherit", env: { ...process.env, PRISMA_GENERATE_SKIP_AUTOINSTALL: "1", ...extra } });
   if (result.status !== 0) throw new Error(`${bin} exited with ${result.status}: ${result.error ?? "see output"}`);
 };
+// `--ai` runs the real-model assistant check instead (uses OpenRouter credit).
+const aiOnly = process.argv.includes("--ai");
 try {
   run("prisma", ["generate", "--schema", schemaPath]);
   run("prisma", ["db", "push", "--schema", schemaPath, "--skip-generate"]);
+  if (aiOnly) { run("tsx", ["scripts/ai-eval.ts"], { POLISH_TEST_CLIENT: clientPath }); }
+  else {
   run("tsx", ["scripts/polish.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/push.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/reminders.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/cancel.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/access.test.ts"], { POLISH_TEST_CLIENT: clientPath });
+  run("tsx", ["scripts/merge.test.ts"], { POLISH_TEST_CLIENT: clientPath });
+  run("tsx", ["scripts/ai-tools.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/clock.test.ts"], { TZ: "UTC" });
+  }
 } finally {
   rmSync(schemaPath, { force: true });
   rmSync(scratch, { recursive: true, force: true });

@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useT } from "@/components/I18nProvider";
-import { LoadError, useAction, Badge, Money, Empty, Stat, callAction, toast, ConfirmDelete, humanError } from "@/components/ui";
+import { LoadError, useAction, Badge, Money, Empty, Stat, callAction, toast, ConfirmDelete, humanError, Modal } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
 import { useCan, ADMIN_UP, OWNER_ONLY } from "@/components/UserProvider";
 import { fmtDate } from "@/lib/dates";
@@ -13,6 +13,10 @@ export default function Invoices() {
   const [unpaid, setUnpaid] = useState(false);
   const [deleting, setDeleting] = useState<any>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Invoices ticked for combining. They must all be one customer's.
+  const [picked, setPicked] = useState<string[]>([]);
+  const [merging, setMerging] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
   const canVoid = useCan(ADMIN_UP);
   // invoices.delete is OWNER-only in the registry.
   const canDelete = useCan(OWNER_ONLY);
@@ -31,6 +35,22 @@ export default function Invoices() {
       toast(next === "VOID" ? `${inv.ref} voided` : `${inv.ref} set to ${next.toLowerCase()}`);
       refresh(); out.refresh();
     } catch (e: any) { toast(humanError(e.message), "err"); } finally { setBusyId(null); }
+  }
+
+  const chosen = (data ?? []).filter((i) => picked.includes(i.id));
+  const pickedCustomer = chosen[0]?.customerId;
+  const canPick = (i: any) => i.status !== "VOID" && (!pickedCustomer || i.customerId === pickedCustomer);
+  const toggle = (i: any) => setPicked((p) => p.includes(i.id) ? p.filter((x) => x !== i.id) : [...p, i.id]);
+  const unpaidOfCustomer = (data ?? []).filter((i) => i.customerId === pickedCustomer && i.status !== "VOID" && i.balanceCents > 0);
+
+  async function merge() {
+    setMergeBusy(true);
+    try {
+      const r = await callAction("invoices.merge", { invoices: chosen.map((i) => i.ref) });
+      toast(`${r.ref} combines ${r.combined.join(", ")}`);
+      setMerging(false); setPicked([]);
+      location.assign(`/invoices/${r.invoiceId}`);
+    } catch (e: any) { toast(humanError(e.message), "err"); } finally { setMergeBusy(false); }
   }
 
   return (
@@ -55,13 +75,27 @@ export default function Invoices() {
         </label>
       </div>
 
+      {canVoid && chosen.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-200 bg-brand-50 px-3 py-2 text-xs text-ink-700">
+          <span className="font-medium">{chosen.length} {t("inv.selected")} · {chosen[0].customer} · {t("inv.balance")} <Money cents={chosen.reduce((a, i) => a + i.balanceCents, 0)} /></span>
+          {unpaidOfCustomer.length > chosen.length && (
+            <button className="btn-ghost btn-sm" onClick={() => setPicked([...new Set([...picked, ...unpaidOfCustomer.map((i) => i.id)])])}>
+              {t("inv.selectAllFor")} {chosen[0].customer}
+            </button>
+          )}
+          <span className="flex-1" />
+          <button className="btn-ghost btn-sm" onClick={() => setPicked([])}>{t("inv.clear")}</button>
+          <button className="btn-primary btn-sm disabled:opacity-50" disabled={chosen.length < 2} onClick={() => setMerging(true)}>{t("inv.merge")}</button>
+        </div>
+      )}
+
       <div className="card overflow-hidden">
         {loading ? <p className="p-4 text-sm text-ink-400">{t("common.loading")}</p>
         : !data?.length ? <Empty text={t("common.empty")} />
         : <div className="overflow-x-auto">
             <table className="w-full min-w-[720px]">
               <thead className="border-b border-ink-100 bg-ink-50/50">
-                <tr><th className="th">Ref</th><th className="th">{t("common.customer")}</th>
+                <tr>{canVoid && <th className="th w-px" />}<th className="th">Ref</th><th className="th">{t("common.customer")}</th>
                   <th className="th">{t("inv.issued")}</th><th className="th">{t("inv.dueDate")}</th>
                   <th className="th text-right">{t("common.total")}</th><th className="th text-right">{t("inv.paid")}</th>
                   <th className="th text-right">{t("inv.balance")}</th><th className="th">{t("common.status")}</th>
@@ -70,6 +104,14 @@ export default function Invoices() {
               <tbody className="divide-y divide-ink-50">
                 {data.map((i) => (
                   <tr key={i.id} className="row-link" onClick={() => location.assign(`/invoices/${i.id}`)}>
+                    {canVoid && (
+                      <td className="td w-px" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" aria-label={`Select ${i.ref}`} checked={picked.includes(i.id)}
+                          disabled={!picked.includes(i.id) && !canPick(i)} onChange={() => toggle(i)}
+                          title={i.status === "VOID" ? undefined : !canPick(i) ? t("inv.mergeOneCustomer") : undefined}
+                          className="disabled:opacity-30" />
+                      </td>
+                    )}
                     <td className="td whitespace-nowrap"><Link href={`/invoices/${i.id}`} className="font-medium text-ink-900 hover:text-brand-600">{i.ref}</Link></td>
                     <td className="td font-medium text-ink-800">{i.customer}</td>
                     <td className="td whitespace-nowrap text-ink-500">{fmtDate(new Date(i.issuedAt))}</td>
@@ -102,6 +144,26 @@ export default function Invoices() {
             </table>
           </div>}
       </div>
+
+      <Modal open={merging} onClose={() => !mergeBusy && setMerging(false)} title={t("inv.mergeTitle")}>
+        <p className="mb-3 text-sm text-ink-600">{t("inv.mergeBody")}</p>
+        <div className="mb-3 divide-y divide-ink-100 rounded-lg border border-ink-100 text-sm">
+          {[...chosen].sort((a, b) => +new Date(a.issuedAt) - +new Date(b.issuedAt)).map((i) => (
+            <div key={i.id} className="flex items-center justify-between px-3 py-2">
+              <span><span className="font-medium text-ink-900">{i.ref}</span> <span className="text-ink-400">· {fmtDate(new Date(i.issuedAt))}</span></span>
+              <span className="text-right"><Money cents={i.totalCents} />{i.paidCents > 0 && <span className="ml-2 text-xs text-emerald-600">{t("inv.paid")} <Money cents={i.paidCents} /></span>}</span>
+            </div>
+          ))}
+          <div className="flex items-center justify-between bg-ink-50/60 px-3 py-2 font-medium">
+            <span>{chosen[0]?.customer}</span>
+            <span>{t("common.total")} <Money cents={chosen.reduce((a, i) => a + i.totalCents, 0)} /> · {t("inv.balance")} <Money cents={chosen.reduce((a, i) => a + i.balanceCents, 0)} /></span>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button className="btn-outline btn-sm" disabled={mergeBusy} onClick={() => setMerging(false)}>{t("common.cancel")}</button>
+          <button className="btn-primary btn-sm disabled:opacity-50" disabled={mergeBusy} onClick={merge}>{t("inv.mergeGo")}</button>
+        </div>
+      </Modal>
 
       <ConfirmDelete
         open={!!deleting} onClose={() => setDeleting(null)} onDone={() => { refresh(); out.refresh(); }}

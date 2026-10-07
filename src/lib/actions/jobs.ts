@@ -2,6 +2,7 @@ import { assertAvailable, scheduleWrite, setJobStatus, setJobTeam } from "../sch
 import { labourFor } from "../labour";
 import { nextRef } from "../ref";
 import { z } from "zod";
+import { categoryIdFor } from "../categories";
 import { db } from "../db";
 import { optionalId, optionalText, nullableId, clearableText } from "../schema";
 import { defineAction, ActionError } from "../registry";
@@ -295,8 +296,7 @@ defineAction({
       if (!e) throw new ActionError("That expense is not linked to this job. Refresh and try again.");
       return e;
     };
-    const categoryId = async (name?: string | null) => name
-      ? (await db.expenseCategory.upsert({ where: { name }, update: {}, create: { name } })).id : undefined;
+    const categoryId = (name?: string | null) => categoryIdFor(name, db);
 
     for (const id of removeExpenseIds ?? []) { mine(id); await db.expense.delete({ where: { id } }); }
     for (const { expenseId, categoryName, spentAt, staffId, ...rest } of updateExpenses ?? []) {

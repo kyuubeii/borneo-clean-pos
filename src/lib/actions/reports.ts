@@ -29,6 +29,28 @@ async function revenueIn(gte: Date, lte: Date) {
   return rows.reduce((a, r) => a + (r.isRefund ? -1 : 1) * (r._sum.amountCents ?? 0), 0);
 }
 
+/**
+ * What is still unpaid for one job on an invoice. An invoice for one job owes
+ * its balance. One that bills several visits (a combined invoice) has its
+ * payments applied to the oldest visits first, so each month owes only for its
+ * own visits instead of every month showing the whole balance.
+ */
+export function unpaidOnJob(inv: any, jobId: string) {
+  const balance = Math.max(0, invoiceTotals(inv).balance);
+  const jobs = (inv.jobs ?? []).filter((j: any) => j.status !== "CANCELLED")
+    .sort((a: any, b: any) => a.scheduledAt.getTime() - b.scheduledAt.getTime());
+  if (jobs.length <= 1) return balance;
+  let paid = Math.max(0, invoiceTotals(inv).paid);
+  let left = balance;
+  for (const j of jobs) {
+    const unpaid = Math.min(left, Math.max(0, j.revenueCents - paid));
+    paid = Math.max(0, paid - j.revenueCents);
+    left -= unpaid;
+    if (j.id === jobId) return unpaid;
+  }
+  return 0;
+}
+
 defineAction({
   name: "reports.summary",
   description: "Headline business figures for a period: sales earned, cash collected, expenses, labour cost, materials, profit, margin, job counts and new customers. Profit is sales minus costs (accrual); revenueCollectedCents is cash actually received. Use for 'how much did we make this month'.",
@@ -43,7 +65,8 @@ defineAction({
       db.invoice.findMany({ where: { issuedAt: { gte, lte }, status: { not: "VOID" } }, include: { items: true, payments: true } }),
       db.expense.aggregate({ _sum: { amountCents: true }, where: { spentAt: { gte, lte }, ...countedExpense } }),
       db.job.findMany({ where: { scheduledAt: { gte, lte } }, include: {
-        assignments: { include: { staff: true } }, timeEntries: true, invoice: { include: { items: true, payments: true } },
+        assignments: { include: { staff: true } }, timeEntries: true,
+        invoice: { include: { items: true, payments: true, jobs: { select: { id: true, scheduledAt: true, revenueCents: true, status: true } } } },
       } }),
       db.customer.count({ where: { createdAt: { gte, lte } } }),
     ]);
@@ -72,7 +95,7 @@ defineAction({
     let unbilledCents = 0;
     for (const j of done) {
       if (!j.invoice) unbilledCents += j.revenueCents;
-      else if (j.invoice.status !== "VOID") owed.set(j.invoice.id, Math.max(0, invoiceTotals(j.invoice).balance));
+      else if (j.invoice.status !== "VOID") owed.set(`${j.invoice.id}:${j.id}`, unpaidOnJob(j.invoice, j.id));
     }
     const outstandingCents = unbilledCents + [...owed.values()].reduce((a, v) => a + v, 0);
     return {

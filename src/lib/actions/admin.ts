@@ -4,6 +4,7 @@ import { optionalId } from "../schema";
 import { defineAction, ActionError } from "../registry";
 import { createAuthUser, deleteAuthUser } from "../supabase/admin";
 import { schedulePush } from "../push";
+import { REMINDER_DAYS } from "../reminders";
 
 defineAction({
   name: "settings.get",
@@ -20,16 +21,42 @@ defineAction({
   },
 });
 
+/**
+ * Settings are stored as text in the forms the screens write. The assistant may
+ * send a number, a boolean or a list, or "1, 3 days"; each is put in the
+ * stored form, and a value the app could not read is refused.
+ */
+function settingValue(key: string, raw: unknown): string {
+  if (key === "reminders.days") {
+    const days = [...new Set((Array.isArray(raw) ? raw : String(raw).match(/\d+/g) ?? []).map(Number))].sort((a, b) => a - b);
+    const bad = days.filter((d) => !(REMINDER_DAYS as readonly number[]).includes(d));
+    if (bad.length) throw new ActionError(`Booking reminders can be ${REMINDER_DAYS.join(" or ")} days before, not ${bad.join(", ")}.`);
+    return days.join(",");
+  }
+  if (key === "invoice.dueDays" || key === "invoice.taxRateBp") {
+    // A cleared field stays cleared, so the default applies, rather than becoming 0.
+    if (String(raw).trim() === "") return "";
+    const n = Number(raw);
+    if (!Number.isInteger(n) || n < 0) throw new ActionError(`${key} must be a whole number.`);
+    return String(n);
+  }
+  if (key.startsWith("notify.")) return String(raw === true || String(raw).toLowerCase() === "true");
+  return Array.isArray(raw) ? raw.join(",") : String(raw);
+}
+
 defineAction({
   name: "settings.update",
-  description: "Update one or more business settings.",
+  description: "Update one or more business settings. Keys: business.name, business.tagline, business.phone, business.email, business.address, business.regNo, business.bank, business.accountName, business.accountNumber; invoice.dueDays (days), invoice.taxRateBp (basis points, 600 is 6%), invoice.paymentTerms, invoice.footer, quote.paymentTerms; notify.bookingConfirmation and notify.paymentReminders (\"true\"/\"false\"); reminders.days: which booking reminders go out, \"1\" (day before), \"3\" (3 days before), \"1,3\" (both) or \"\" (none); ai.model.",
   category: "Settings", roles: ["OWNER", "ADMIN"],
-  input: z.object({ values: z.record(z.string()).describe("Map of setting key to value") }),
+  input: z.object({ values: z.record(z.union([z.string(), z.number(), z.boolean(), z.array(z.number())])).describe("Map of setting key to value, e.g. {\"reminders.days\": \"1,3\"}") }),
   handler: async ({ values }) => {
-    for (const [key, value] of Object.entries(values)) {
+    const saved: Record<string, string> = {};
+    for (const [key, raw] of Object.entries(values)) {
+      const value = settingValue(key, raw);
       await db.setting.upsert({ where: { key }, update: { value }, create: { key, value } });
+      saved[key] = value;
     }
-    return { updated: Object.keys(values).length };
+    return { updated: Object.keys(saved).length, saved };
   },
 });
 

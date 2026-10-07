@@ -1,5 +1,6 @@
 import { assertAvailable, scheduleWrite, setJobStatus } from "../scheduling";
 import { z } from "zod";
+import { categoryIdFor } from "../categories";
 import { db } from "../db";
 import { optionalId, nullableId, optionalText, clearableText } from "../schema";
 import { defineAction, ActionError } from "../registry";
@@ -362,11 +363,7 @@ defineAction({
   handler: async ({ expenseId, categoryName, spentAt, staffId, ...rest }) => {
     const e = await db.expense.findUnique({ where: { id: expenseId } });
     if (!e) throw new ActionError("Expense not found");
-    let categoryId: string | undefined;
-    if (categoryName) {
-      const c = await db.expenseCategory.upsert({ where: { name: categoryName }, update: {}, create: { name: categoryName } });
-      categoryId = c.id;
-    }
+    const categoryId = await categoryIdFor(categoryName);
     // A reimbursed tick says "this person has been paid back for this row". It cannot
     // follow the row to somebody else, who may never have been paid anything.
     const movedPayer = staffId !== undefined && staffId !== e.staffId;
