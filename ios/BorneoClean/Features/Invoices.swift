@@ -260,7 +260,7 @@ struct InvoiceDetailView: View {
                         ForEach(inv["payments"].array.rows()) { p in
                             HStack {
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("\(p["ref"].str)  ").font(.subheadline.weight(.medium)) + Text(p["method"].str).font(.caption).foregroundStyle(.secondary)
+                                    Text("\(p["ref"].str)  ").font(.subheadline.weight(.medium)) + Text(p["method"].str + (p["receivedBy"]["name"].nonEmpty.map { " · \(t("pay.collectedBy")) \($0)" } ?? "")).font(.caption).foregroundStyle(.secondary)
                                     Text("\(p["paidAt"].date.map(Fmt.dateTime) ?? "")\(p["note"].nonEmpty.map { " · \($0)" } ?? "")").font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
@@ -328,6 +328,9 @@ struct PaySheet: View {
     @State private var amount = ""
     @State private var method = "BANK"
     @State private var reference = ""
+    // Empty means the owner received it; a cleaner's id means they collected it and keep it.
+    @State private var receivedById = ""
+    @State private var staff: [JSON] = []
     @State private var busy = false
     @State private var confirming = false
 
@@ -338,8 +341,12 @@ struct PaySheet: View {
                 Section {
                     MoneyField(label: t("common.amount"), text: $amount)
                     Picker("Method", selection: $method) { ForEach(METHODS, id: \.self) { Text($0).tag($0) } }
+                    Picker(t("pay.receivedBy"), selection: $receivedById) {
+                        Text(t("pay.me")).tag("")
+                        ForEach(staff.rows()) { s in Text(s["name"].str).tag(s.id) }
+                    }
                     TextField("Reference (\(t("common.optional")))", text: $reference)
-                } footer: { Text("Partial payments are supported.") }
+                } footer: { Text(receivedById.isEmpty ? "Partial payments are supported." : t("pay.keptHint")) }
             }
             .navigationTitle(t("inv.recordPayment"))
             .navigationBarTitleDisplayMode(.inline)
@@ -348,7 +355,8 @@ struct PaySheet: View {
                 ToolbarItem(placement: .cancellationAction) { Button(t("common.cancel")) { dismiss() }.disabled(busy) }
                 ToolbarItem(placement: .confirmationAction) { Button(busy ? t("common.saving") : "Record") { check() }.disabled(busy) }
             }
-            .onAppear { amount = Fmt.fixed2(invoice["balance"].i); reference = "" }
+            .onAppear { amount = Fmt.fixed2(invoice["balance"].i); reference = ""; receivedById = "" }
+            .task { if let v = try? await API.shared.call("staff.list", [:]) { staff = v.array } }
             .confirmationDialog("Record \(Fmt.money(Fmt.toCents(amount))) by \(method) against \(invoice["ref"].str)?", isPresented: $confirming, titleVisibility: .visible) {
                 Button(t("inv.recordPayment")) { Task { await go() } }
             }
@@ -366,6 +374,7 @@ struct PaySheet: View {
         busy = true
         var input: JSON = ["invoiceId": .string(invoice.id), "amountCents": .number(Double(Fmt.toCents(amount))), "method": .string(method)]
         input.set("reference", .orOmit(reference))
+        input.set("receivedById", .orOmit(receivedById))
         do { try await API.shared.call("payments.record", input); toast("Payment recorded"); await onDone(); dismiss() }
         catch { toast(error.localizedDescription, error: true) }
         busy = false
@@ -461,7 +470,7 @@ struct PaymentsView: View {
                                 Tag(text: p["method"].str)
                             }
                             Text(p["customer"].str).font(.subheadline)
-                            Text("\(p["paidAt"].date.map(Fmt.dateTime) ?? "")\(p["invoiceRef"].nonEmpty.map { " · \($0)" } ?? "")").font(.caption).foregroundStyle(.secondary)
+                            Text("\(p["paidAt"].date.map(Fmt.dateTime) ?? "")\(p["invoiceRef"].nonEmpty.map { " · \($0)" } ?? "")\(p["collectedBy"].nonEmpty.map { " · \(t("pay.collectedBy")) \($0)" } ?? "")").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         MoneyText(cents: p["amountCents"].i).font(.subheadline.weight(.semibold)).foregroundStyle(p["amountCents"].i < 0 ? Color.red : Brand.good)

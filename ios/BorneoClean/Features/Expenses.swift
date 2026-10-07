@@ -53,8 +53,8 @@ struct ExpensesView: View {
                 }
             }
             if !isStaff {
-                Section("Money advanced by staff") {
-                    if advances.isEmpty { Text("Nobody has advanced money").foregroundStyle(.secondary) }
+                Section(t("staff.owedTitle")) {
+                    if advances.isEmpty { Text(t("staff.owedNone")).foregroundStyle(.secondary) }
                     ForEach(advances.rows(key: "staffId")) { x in
                         VStack(alignment: .leading, spacing: 3) {
                             HStack {
@@ -65,6 +65,14 @@ struct ExpensesView: View {
                             }
                             Text("advanced \(Fmt.moneyUI(x["advancedCents"].i)) · settled on rows \(Fmt.moneyUI(x["clearedCents"].i)) · \(x["entries"].i) entries")
                                 .font(.caption).foregroundStyle(.secondary)
+                            if x["earnedCents"].i > 0 {
+                                Text("plus \(Fmt.moneyUI(x["earnedCents"].i)) pay on completed jobs (driver fees)\(x["wagesPaidCents"].i > 0 ? ", less \(Fmt.moneyUI(x["wagesPaidCents"].i)) wages paid" : "")")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            if x["collectedCents"].i > 0 {
+                                Text("less \(Fmt.moneyUI(x["collectedCents"].i)) customer payments \(x["name"].str) collected and kept")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             if x["unallocatedCents"].i > 0 {
                                 Text("of \(Fmt.moneyUI(x["repaidCents"].i)) paid back, \(Fmt.moneyUI(x["unallocatedCents"].i)) is not yet matched to rows — ticking those rows records which advance it covered and will not change what is owed")
                                     .font(.caption).foregroundStyle(.secondary)
