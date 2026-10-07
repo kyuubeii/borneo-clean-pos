@@ -334,6 +334,9 @@ struct ReportsView: View {
     @State private var expenses: [JSON] = []
     @State private var trend: [JSON] = []
     @State private var error: String?
+    // Summary is the overview; Ledger is the month's money laid out like the spreadsheet.
+    @State private var view = "summary"
+    @State private var ledger: JSON?
 
     /// "month" is whichever month the picker shows; the others run back from today.
     private static let presets: [(String, String)] = [("month", "Month"), ("90", "Last 90 days"), ("year", "Last 12 months")]
@@ -350,13 +353,52 @@ struct ReportsView: View {
     var body: some View {
         List {
             Section {
-                ChipPicker(options: Self.presets, selection: $preset).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
-                if preset == "month" {
+                ChipPicker(options: [("summary", t("ledger.view.summary")), ("ledger", t("ledger.view.ledger"))], selection: $view)
+                    .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                if view == "summary" {
+                    ChipPicker(options: Self.presets, selection: $preset).listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
+                }
+                if preset == "month" || view == "ledger" {
                     HStack { MonthPicker(month: $month); Spacer() }.padding(.horizontal, 16)
                         .listRowInsets(EdgeInsets()).listRowBackground(Color.clear)
                 }
             } footer: { Text("\(Fmt.date(period.from)) — \(Fmt.date(period.to))") }
             LoadErrorView(error: error) { Task { await load() } }
+            if view == "ledger" { ledgerSections } else { summarySections }
+        }
+        .navigationTitle(t("nav.reports"))
+        .task(id: "\(view)|\(preset)|\(Fmt.isoDate(month))") { await load() }
+        .refreshable { await load() }
+        .onChange(of: AppState.shared.refreshTick) { Task { await load() } }
+    }
+
+    /// One sheet per person, each a grid that scrolls sideways so the columns stay columns.
+    @ViewBuilder private var ledgerSections: some View {
+        if let l = ledger {
+            Section { Text(t("ledger.intro")).font(.caption).foregroundStyle(.secondary) }
+            let o = l["owner"]
+            Section(l["ownerName"].str) {
+                LedgerSheet(second: t("ledger.customerPaidTo"),
+                            cols: [("collectedCents", t("ledger.collected")), ("paidCents", t("ledger.paid")), ("uncollectedCents", t("ledger.uncollected"))],
+                            rows: o["rows"].array, totals: o["totals"],
+                            foot: [(t("ledger.broughtForward"), "collectedCents", o["broughtForwardCents"].i, false),
+                                   (t("ledger.balance"), "collectedCents", o["balanceCents"].i, true)])
+            }
+            ForEach(l["workers"].array.rows(key: "staffId")) { w in
+                Section(w["name"].str) {
+                    LedgerSheet(second: t("ledger.itemFrom"),
+                                cols: [("expenseCents", t("ledger.expense")), ("driverCents", t("ledger.driver")),
+                                       ("fromOwnerCents", "\(t("ledger.from")) \(l["ownerName"].str) (RM)"), ("fromCustomerCents", t("ledger.fromCustomer"))],
+                                rows: w["rows"].array, totals: w["totals"],
+                                foot: [(t("ledger.broughtForward"), "expenseCents", w["broughtForwardCents"].i, false),
+                                       ("\(t("ledger.owedTo")) \(w["name"].str)", "expenseCents", w["owedCents"].i, true)]
+                                    + (w["driverEarnedToDateCents"].i != 0 ? [(t("ledger.driverToDate"), "driverCents", w["driverEarnedToDateCents"].i, false)] : []))
+                }
+            }
+        } else if error == nil { LoadingRow() }
+    }
+
+    @ViewBuilder private var summarySections: some View {
             Section {
                 StatGrid {
                     StatTile(label: "Sales earned", value: Fmt.moneyUI(s?["salesCents"].i ?? 0),
@@ -387,11 +429,6 @@ struct ReportsView: View {
                 }
             }
             table("Expenses by category", expenses.map { ($0["category"].str, "\($0["count"].i)", Fmt.moneyUI($0["amountCents"].i)) }, cols: ("Category", "Count", "Amount"))
-        }
-        .navigationTitle(t("nav.reports"))
-        .task(id: "\(preset)|\(Fmt.isoDate(month))") { await load() }
-        .refreshable { await load() }
-        .onChange(of: AppState.shared.refreshTick) { Task { await load() } }
     }
 
     @ViewBuilder private func table(_ title: String, _ rows: [(String, String, String)], cols: (String, String, String)) -> some View {
@@ -413,6 +450,12 @@ struct ReportsView: View {
     }
 
     private func load() async {
+        if view == "ledger" {
+            let m = String(Fmt.isoDate(Fmt.startOfMonth(month)).prefix(7))
+            do { ledger = try await API.shared.call("reports.ledger", ["month": .string(m)]); error = nil }
+            catch { self.error = error.localizedDescription }
+            return
+        }
         let from = Fmt.isoDate(period.from), to = Fmt.isoDate(period.to)
         let range: JSON = ["from": .string(from), "to": .string(to)]
         let r = await API.shared.batch([
@@ -429,5 +472,68 @@ struct ReportsView: View {
         if case .success(let v) = r[3] { staffPerf = v.array }
         if case .success(let v) = r[4] { expenses = v.array }
         if case .success(let v) = r[5] { trend = v.array }
+    }
+}
+
+/// A month ledger sheet in the spreadsheet's layout: teal header, the lines, then
+/// a total row and the brought-forward and balance lines.
+struct LedgerSheet: View {
+    let second: String
+    let cols: [(String, String)]
+    let rows: [JSON]
+    let totals: JSON
+    let foot: [(String, String, Int, Bool)]
+
+    private static let teal = Color(hex: 0x0E7C7B), tealSoft = Color(hex: 0xE2F2F1)
+    private static let nf: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.minimumFractionDigits = 2; f.maximumFractionDigits = 2; return f
+    }()
+    private func num(_ c: Int) -> String { c == 0 ? "-" : (Self.nf.string(from: NSNumber(value: Double(c) / 100)) ?? "") }
+    private func day(_ iso: String) -> String { let p = iso.split(separator: "-"); return p.count == 3 ? "\(p[2])/\(p[1])/\(p[0])" : iso }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: true) {
+            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    cell(t("ledger.date"), w: 86); cell(second, w: 190)
+                    ForEach(cols, id: \.0) { c in cell(c.1, w: 112, trailing: true) }
+                }
+                .font(.caption.weight(.semibold)).foregroundStyle(.white).background(Self.teal)
+                if rows.isEmpty {
+                    GridRow { cell(t("ledger.nothing"), w: 276).foregroundStyle(.secondary).gridCellColumns(2) }
+                }
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
+                    GridRow {
+                        cell(day(r["date"].str), w: 86).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(r["label"].str).lineLimit(2)
+                            if let ref = r["ref"].nonEmpty { Text(ref).font(.caption2).foregroundStyle(.secondary) }
+                        }.frame(width: 182, alignment: .leading).padding(.horizontal, 4).padding(.vertical, 5)
+                        ForEach(cols, id: \.0) { c in cell(num(r[c.0].i), w: 112, trailing: true) }
+                    }
+                    .font(.footnote)
+                    Divider().gridCellUnsizedAxes(.horizontal)
+                }
+                GridRow {
+                    cell("", w: 86); cell(t("common.total"), w: 190)
+                    ForEach(cols, id: \.0) { c in cell(num(totals[c.0].i), w: 112, trailing: true) }
+                }
+                .font(.footnote.weight(.semibold)).background(Self.tealSoft)
+                ForEach(Array(foot.enumerated()), id: \.offset) { _, f in
+                    GridRow {
+                        cell("", w: 86); cell(f.0, w: 190)
+                        ForEach(cols, id: \.0) { c in cell(c.0 == f.1 ? num(f.2) : "", w: 112, trailing: true) }
+                    }
+                    .font(f.3 ? .footnote.weight(.semibold) : .footnote)
+                }
+            }
+            .monospacedDigit()
+        }
+        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+    }
+
+    private func cell(_ s: String, w: CGFloat, trailing: Bool = false) -> some View {
+        Text(s).lineLimit(2).frame(width: w - 8, alignment: trailing ? .trailing : .leading)
+            .padding(.horizontal, 4).padding(.vertical, 6)
     }
 }
