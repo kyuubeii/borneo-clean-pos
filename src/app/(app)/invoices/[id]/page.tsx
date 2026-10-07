@@ -52,7 +52,7 @@ export default function InvoiceDetail({ params }: { params: Promise<{ id: string
           kind="INVOICE" docRef={inv.ref} customer={inv.customer}
           issuedAt={inv.issuedAt} dueAt={inv.dueAt} items={inv.items}
           discountCents={inv.discountCents} taxRateBp={inv.taxRateBp}
-          notes={inv.notes} business={s} onOverflowChange={setClipped}
+          notes={inv.notes} business={s} onOverflowChange={setClipped} paidCents={inv.paid}
         />
       </div>
 

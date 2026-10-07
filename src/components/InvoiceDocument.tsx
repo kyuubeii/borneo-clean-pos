@@ -67,7 +67,7 @@ export function addressLines(customer: DocCustomer): string[] {
 
 export default function InvoiceDocument({
   kind, docRef, customer, issuedAt, dueAt, items, discountCents = 0, taxRateBp = 0,
-  notes, paymentTerms, business = {}, onOverflowChange,
+  notes, paymentTerms, business = {}, onOverflowChange, paidCents = 0,
 }: {
   kind: DocKind;
   docRef: string;
@@ -83,6 +83,8 @@ export default function InvoiceDocument({
   business?: Record<string, string>;
   /** Told when the content no longer fits the sheet, so the page can say so. */
   onOverflowChange?: (overflowing: boolean) => void;
+  /** Money already received. An invoice with payments asks only for the balance. */
+  paidCents?: number;
 }) {
   const quotation = kind === "QUOTATION";
   const frame = useRef<HTMLDivElement>(null);
@@ -227,10 +229,25 @@ export default function InvoiceDocument({
               <span className="invoice-total-amount">{signedMoney(t.tax)}</span>
             </div>
           )}
-          <div className="invoice-total-row">
-            <strong>{quotation ? "TOTAL QUOTED" : "TOTAL AMOUNT DUE"}</strong>
-            <strong className="invoice-total-amount">{signedMoney(t.total)}</strong>
-          </div>
+          {!quotation && paidCents > 0 ? <>
+            {t.total !== t.subtotal && (
+              <div className="invoice-total-row">
+                <span>Total</span><span className="invoice-total-amount">{signedMoney(t.total)}</span>
+              </div>
+            )}
+            <div className="invoice-total-row">
+              <span>Paid</span><span className="invoice-total-amount">{signedMoney(-paidCents)}</span>
+            </div>
+            <div className="invoice-total-row">
+              <strong>{t.total - paidCents <= 0 ? "PAID IN FULL" : "BALANCE DUE"}</strong>
+              <strong className="invoice-total-amount">{signedMoney(Math.max(0, t.total - paidCents))}</strong>
+            </div>
+          </> : (
+            <div className="invoice-total-row">
+              <strong>{quotation ? "TOTAL QUOTED" : "TOTAL AMOUNT DUE"}</strong>
+              <strong className="invoice-total-amount">{signedMoney(t.total)}</strong>
+            </div>
+          )}
         </div>
 
         {quotation ? (
