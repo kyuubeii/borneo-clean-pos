@@ -12,6 +12,21 @@ struct InvoicesView: View {
     @State private var deleting: JSON?
     @State private var voiding: JSON?
     @State private var busyId: String?
+    // Combining: ticked invoices, which must all be one customer's.
+    @State private var selecting = false
+    @State private var picked: [String] = []
+    @State private var merging = false
+    @State private var mergeBusy = false
+
+    private var chosen: [JSON] { (data ?? []).filter { picked.contains($0.id) } }
+    private func canPick(_ i: JSON) -> Bool {
+        i["status"].str != "VOID" && (chosen.first.map { $0["customerId"].str == i["customerId"].str } ?? true)
+    }
+    private func toggle(_ i: JSON) {
+        if picked.contains(i.id) { picked.removeAll { $0 == i.id } }
+        else if canPick(i) { picked.append(i.id) }
+        else if i["status"].str != "VOID" { toast(t("inv.mergeOneCustomer"), error: true) }
+    }
 
     var body: some View {
         let canVoid = app.user?.can(ADMIN_UP) == true
@@ -37,9 +52,68 @@ struct InvoicesView: View {
             LoadErrorView(error: error) { Task { await load() } }
             if data == nil && error == nil { LoadingRow() }
             else if data?.isEmpty == true { EmptyState(text: t("common.empty")) }
+            if selecting, let first = chosen.first {
+                let unpaidOfCustomer = (data ?? []).filter { $0["customerId"].str == first["customerId"].str && $0["status"].str != "VOID" && $0["balanceCents"].i > 0 }
+                Section {
+                    HStack {
+                        Text("\(chosen.count) \(t("inv.selected")) · \(first["customer"].str)").font(.subheadline.weight(.medium))
+                        Spacer()
+                        MoneyText(cents: chosen.reduce(0) { $0 + $1["balanceCents"].i }).font(.subheadline.weight(.semibold)).foregroundStyle(Brand.warn)
+                    }
+                    if unpaidOfCustomer.count > chosen.count {
+                        Button("\(t("inv.selectAllFor")) \(first["customer"].str)") {
+                            for i in unpaidOfCustomer where !picked.contains(i.id) { picked.append(i.id) }
+                        }
+                    }
+                    Button(t("inv.merge")) { merging = true }
+                        .disabled(chosen.count < 2 || mergeBusy)
+                        .font(.body.weight(.semibold))
+                }
+            }
             Section {
                 ForEach((data ?? []).rows()) { i in
+                    if selecting {
+                        Button { toggle(i.json) } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: picked.contains(i.id) ? "checkmark.circle.fill" : "circle")
+                                    .font(.title3)
+                                    .foregroundStyle(picked.contains(i.id) ? Brand.b600 : Color.secondary)
+                                row(i)
+                            }
+                            .opacity(picked.contains(i.id) || canPick(i.json) ? 1 : 0.35)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
                     NavigationLink(value: Route.invoice(i.id)) {
+                        row(i)
+                        .opacity(busyId == i.id ? 0.5 : 1)
+                    }
+                    .swipeActions {
+                        if canDelete { Button(t("common.delete"), role: .destructive) { deleting = i.json }.tint(.red) }
+                        if canVoid && i["status"].str != "VOID" { Button("Void") { voiding = i.json }.tint(.orange) }
+                    }
+                    }
+                }
+            }
+        }
+        .navigationTitle(t("nav.invoices"))
+        .toolbar {
+            if canVoid {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button(selecting ? t("common.cancel") : t("inv.select")) { selecting.toggle(); picked = [] }
+                }
+            }
+        }
+        .confirmationDialog(t("inv.mergeTitle"), isPresented: $merging, titleVisibility: .visible) {
+            Button("\(t("inv.mergeGo")) \(chosen.count) · \(Fmt.moneyUI(chosen.reduce(0) { $0 + $1["totalCents"].i }))") { Task { await merge() } }
+        } message: {
+            Text("\(chosen.sorted { ($0["issuedAt"].date ?? .distantPast) < ($1["issuedAt"].date ?? .distantPast) }.map { $0["ref"].str }.joined(separator: ", "))\n\n\(t("inv.mergeBody"))")
+        }
+        .task(id: "\(status)|\(unpaid)") { await load() }
+        .modifier(InvoiceListSheets(app: app, deleting: $deleting, voiding: $voiding, load: { await load() }, setStatus: { await setStatus($0, $1) }))
+    }
+
+    @ViewBuilder private func row(_ i: Row) -> some View {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(i["ref"].str).font(.subheadline.weight(.semibold))
@@ -63,29 +137,18 @@ struct InvoicesView: View {
                                 }
                             }
                         }
-                        .opacity(busyId == i.id ? 0.5 : 1)
-                    }
-                    .swipeActions {
-                        if canDelete { Button(t("common.delete"), role: .destructive) { deleting = i.json }.tint(.red) }
-                        if canVoid && i["status"].str != "VOID" { Button("Void") { voiding = i.json }.tint(.orange) }
-                    }
-                }
-            }
-        }
-        .navigationTitle(t("nav.invoices"))
-        .task(id: "\(status)|\(unpaid)") { await load() }
-        .refreshable { await load() }
-        .onChange(of: app.refreshTick) { Task { await load() } }
-        .confirmationDialog("Void this invoice?", isPresented: Binding(get: { voiding != nil }, set: { if !$0 { voiding = nil } }), titleVisibility: .visible) {
-            Button("Void \(voiding?["ref"].str ?? "")", role: .destructive) { if let v = voiding { Task { await setStatus(v, "VOID") } } }
-        } message: { Text("The record and any payments are kept; it simply stops counting as owed.") }
-        .sheet(item: Binding(get: { deleting.map { Row($0) } }, set: { deleting = $0?.json })) { r in
-            ConfirmDeleteSheet(title: "Delete invoice permanently", action: "invoices.delete", input: ["invoiceId": .string(r.id)],
-                               confirmText: r["ref"].str, confirmLabel: "the invoice reference",
-                               message: "Invoice \(r["ref"].str) for \(r["customer"].str) and its line items are removed for good. It will disappear from your takings and outstanding figures. This cannot be undone.\n\nIt is refused once any payment has been recorded against it.",
-                               alternative: "To cancel an invoice that has already gone out, close this and use Void — the record and any payments are kept, it just stops counting as owed.",
-                               onDone: { Task { await load() } })
-        }
+    }
+
+    private func merge() async {
+        mergeBusy = true
+        do {
+            let r = try await API.shared.call("invoices.merge", ["invoices": .array(chosen.map { .string($0["ref"].str) })])
+            toast("\(r["ref"].str) combines \(r["combined"].array.map { $0.str }.joined(separator: ", "))")
+            selecting = false; picked = []
+            await load()
+            Router.shared.push(.invoice(r["invoiceId"].str))
+        } catch { toast(humanError(error.localizedDescription), error: true) }
+        mergeBusy = false
     }
 
     private func load() async {
@@ -104,6 +167,31 @@ struct InvoicesView: View {
             await load()
         } catch { toast(humanError(error.localizedDescription), error: true) }
         busyId = nil
+    }
+}
+
+/// The void and delete prompts, kept apart so the list's body stays small enough to type-check.
+private struct InvoiceListSheets: ViewModifier {
+    let app: AppState
+    @Binding var deleting: JSON?
+    @Binding var voiding: JSON?
+    let load: () async -> Void
+    let setStatus: (JSON, String) async -> Void
+
+    func body(content: Content) -> some View {
+        content
+        .refreshable { await load() }
+        .onChange(of: app.refreshTick) { Task { await load() } }
+        .confirmationDialog("Void this invoice?", isPresented: Binding(get: { voiding != nil }, set: { if !$0 { voiding = nil } }), titleVisibility: .visible) {
+            Button("Void \(voiding?["ref"].str ?? "")", role: .destructive) { if let v = voiding { Task { await setStatus(v, "VOID") } } }
+        } message: { Text("The record and any payments are kept; it simply stops counting as owed.") }
+        .sheet(item: Binding(get: { deleting.map { Row($0) } }, set: { deleting = $0?.json })) { r in
+            ConfirmDeleteSheet(title: "Delete invoice permanently", action: "invoices.delete", input: ["invoiceId": .string(r.id)],
+                               confirmText: r["ref"].str, confirmLabel: "the invoice reference",
+                               message: "Invoice \(r["ref"].str) for \(r["customer"].str) and its line items are removed for good. It will disappear from your takings and outstanding figures. This cannot be undone.\n\nIt is refused once any payment has been recorded against it.",
+                               alternative: "To cancel an invoice that has already gone out, close this and use Void — the record and any payments are kept, it just stops counting as owed.",
+                               onDone: { Task { await load() } })
+        }
     }
 }
 
