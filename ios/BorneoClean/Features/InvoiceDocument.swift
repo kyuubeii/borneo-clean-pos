@@ -34,7 +34,7 @@ enum InvoiceDocument {
     }
 
     static func html(kind: Kind, ref: String, customer: JSON, issuedAt: Date?, dueAt: Date?, items: [JSON],
-                     discountCents: Int, taxRateBp: Int, notes: String?, business: [String: JSON]) -> String {
+                     discountCents: Int, taxRateBp: Int, notes: String?, business: [String: JSON], paidCents: Int = 0) -> String {
         let quotation = kind == .quotation
         let b = { (k: String) -> String in business[k]?.str ?? "" }
         let tt = Fmt.totals(items.map { ($0["qty"].i, $0["priceCents"].i) }, discountCents: discountCents, taxRateBp: taxRateBp)
@@ -87,7 +87,15 @@ enum InvoiceDocument {
         h += "<div class=\"invoice-total-row\"><span>Subtotal</span><span class=\"invoice-total-amount\">\(signed(tt.subtotal))</span></div>"
         if tt.discount > 0 { h += "<div class=\"invoice-total-row\"><span>Discount</span><span class=\"invoice-total-amount\">\(signed(-tt.discount))</span></div>" }
         if tt.tax > 0 { h += "<div class=\"invoice-total-row\"><span>Tax (\(String(format: "%.2f", Double(taxRateBp) / 100))%)</span><span class=\"invoice-total-amount\">\(signed(tt.tax))</span></div>" }
-        h += "<div class=\"invoice-total-row\"><strong>\(quotation ? "TOTAL QUOTED" : "TOTAL AMOUNT DUE")</strong><strong class=\"invoice-total-amount\">\(signed(tt.total))</strong></div></div>"
+        if !quotation && paidCents > 0 {
+            // An invoice with money already in asks only for the balance.
+            let left = max(0, tt.total - paidCents)
+            if tt.total != tt.subtotal { h += "<div class=\"invoice-total-row\"><span>Total</span><span class=\"invoice-total-amount\">\(signed(tt.total))</span></div>" }
+            h += "<div class=\"invoice-total-row\"><span>Paid</span><span class=\"invoice-total-amount\">\(signed(-paidCents))</span></div>"
+            h += "<div class=\"invoice-total-row\"><strong>\(left == 0 ? "PAID IN FULL" : "BALANCE DUE")</strong><strong class=\"invoice-total-amount\">\(signed(left))</strong></div></div>"
+        } else {
+            h += "<div class=\"invoice-total-row\"><strong>\(quotation ? "TOTAL QUOTED" : "TOTAL AMOUNT DUE")</strong><strong class=\"invoice-total-amount\">\(signed(tt.total))</strong></div></div>"
+        }
 
         if quotation {
             h += "<section class=\"quotation-terms\"><strong>QUOTATION TERMS</strong>"

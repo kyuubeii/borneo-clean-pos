@@ -303,7 +303,7 @@ struct InvoiceDetailView: View {
                     DocumentPreview(title: inv["ref"].str, html: InvoiceDocument.html(
                         kind: .invoice, ref: inv["ref"].str, customer: inv["customer"], issuedAt: inv["issuedAt"].date, dueAt: inv["dueAt"].date,
                         items: inv["items"].array, discountCents: inv["discountCents"].i, taxRateBp: inv["taxRateBp"].i,
-                        notes: inv["notes"].string, business: biz.object))
+                        notes: inv["notes"].string, business: biz.object, paidCents: inv["paid"].i))
                     .navigationTitle(inv["ref"].str)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .cancellationAction) { Button(t("common.close")) { showDoc = false } } }
