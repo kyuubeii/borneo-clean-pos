@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useT } from "@/components/I18nProvider";
 import { useAction, Money, Empty, Stat, MonthPicker } from "@/components/ui";
 import PageHeader from "@/components/PageHeader";
+import Ledger from "@/components/Ledger";
 import { startOfMonth, endOfMonth, addDays, addMonths, fmtDate, isoDate } from "@/lib/dates";
 
 /** "month" is whichever month the picker shows; the others run back from today. */
@@ -15,6 +16,8 @@ const PRESETS = [
 export default function Reports() {
   const t = useT();
   const [preset, setPreset] = useState("month");
+  // Summary is the overview; Ledger is the month's money laid out like the spreadsheet.
+  const [view, setView] = useState<"summary" | "ledger">("summary");
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
   const p = PRESETS.find((x) => x.key === preset)!;
   const fromD = p.from ? p.from() : startOfMonth(month), toD = p.to ? p.to() : endOfMonth(month);
@@ -34,16 +37,23 @@ export default function Reports() {
     <div className="space-y-4">
       <PageHeader title={t("nav.reports")} subtitle={`${fmtDate(fromD)} — ${fmtDate(toD)}`} actions={
         <>
-          {preset === "month" && <MonthPicker value={month} onChange={setMonth} thisMonthLabel={t("dash.thisMonth")} />}
           <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 text-xs font-medium">
+            {(["summary", "ledger"] as const).map((v) => (
+              <button key={v} onClick={() => { setView(v); if (v === "ledger") setPreset("month"); }}
+                className={`rounded-md px-2.5 py-1.5 transition ${view === v ? "bg-brand-600 text-white" : "text-ink-500 hover:text-ink-800"}`}>{t(`ledger.view.${v}`)}</button>
+            ))}
+          </div>
+          {preset === "month" && <MonthPicker value={month} onChange={setMonth} thisMonthLabel={t("dash.thisMonth")} />}
+          {view === "summary" && <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 text-xs font-medium">
             {PRESETS.map((x) => (
               <button key={x.key} onClick={() => setPreset(x.key)}
                 className={`rounded-md px-2.5 py-1.5 transition ${preset === x.key ? "bg-brand-600 text-white" : "text-ink-500 hover:text-ink-800"}`}>{x.label}</button>
             ))}
-          </div>
+          </div>}
           <button onClick={() => window.print()} className="btn-outline btn-sm">{t("common.print")}</button>
         </>} />
 
+      {view === "ledger" ? <Ledger month={`${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`} /> : <>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Sales earned" value={<Money cents={s?.salesCents ?? 0} />} tone="good"
           sub={<>Collected <Money cents={s?.revenueCollectedCents ?? 0} /> · owing <Money cents={s?.outstandingCents ?? 0} />
@@ -71,6 +81,7 @@ export default function Reports() {
         <Table title="Expenses by category" cols={["Category", "Count", "Amount"]} rows={(expenses.data ?? []).map((r) => [
           <span key="a" className="font-medium text-ink-800">{r.category}</span>, r.count, <Money key="c" cents={r.amountCents} />])} />
       </div>
+      </>}
     </div>
   );
 }

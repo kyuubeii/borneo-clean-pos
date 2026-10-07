@@ -36,6 +36,7 @@ try {
   run("tsx", ["scripts/access.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/merge.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/collect.test.ts"], { POLISH_TEST_CLIENT: clientPath });
+  run("tsx", ["scripts/ledger.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/ai-tools.test.ts"], { POLISH_TEST_CLIENT: clientPath });
   run("tsx", ["scripts/clock.test.ts"], { TZ: "UTC" });
   }

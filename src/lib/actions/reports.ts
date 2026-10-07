@@ -2,9 +2,9 @@ import { z } from "zod";
 import { db } from "../db";
 import { optionalId } from "../schema";
 import { defineAction } from "../registry";
-import { startOfDay, endOfDay, startOfMonth, endOfMonth, addDays, isoDate } from "../dates";
+import { startOfDay, endOfDay, startOfMonth, endOfMonth, addDays, isoDate, businessClock, businessDayStart } from "../dates";
 import { invoiceTotals } from "./finance";
-import { jobLabour } from "../labour";
+import { jobLabour, labourFor } from "../labour";
 
 /**
  * Expenses that count as a cost. One booked against a job that was then
@@ -315,4 +315,90 @@ defineAction({
   input: z.object({ source: z.enum(["ui", "assistant", "system"]).optional(), limit: z.number().int().max(200).default(50) }),
   handler: async ({ source, limit }) => db.auditLog.findMany({
     where: source ? { source } : {}, orderBy: { createdAt: "desc" }, take: limit }),
+});
+
+/* --------------------------------- Ledger ---------------------------------- */
+
+/** One line of a ledger sheet. Amount fields are left out when zero, to keep it small. */
+type LedgerRow = { date: string; label: string; ref?: string; [amount: string]: string | number | undefined };
+const kuchingDate = (d: Date) => businessClock(d).date;
+const byDate = (a: LedgerRow, b: LedgerRow) => a.date.localeCompare(b.date);
+const sumOf = (rows: LedgerRow[], k: string) => rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+const row = (date: Date, label: string, amounts: Record<string, number>, ref?: string): LedgerRow => ({
+  date: kuchingDate(date), label, ...(ref ? { ref } : {}),
+  ...Object.fromEntries(Object.entries(amounts).filter(([, v]) => v !== 0)),
+});
+const isDriver = (category?: string | null) => /driver/i.test(category ?? "");
+
+defineAction({
+  name: "reports.ledger",
+  description: "The money ledger for one month, laid out like the owner's spreadsheet. The owner's sheet: every amount collected, every amount paid out (expenses the owner paid, payouts to staff) and work done but not yet paid, with the balance brought forward and carried on. One sheet per worker: expenses they paid, their driver fees and job pay, what the owner paid them and customer money they collected, with what is owed to them. Use for 'show me September's ledger', 'what did Jong get in September' or 'how much cash should I have'.",
+  category: "Reports", roles: ["OWNER", "ADMIN"], readOnly: true,
+  input: z.object({ month: z.string().regex(/^\d{4}-\d{2}$/).describe("Month on the Kuching calendar, e.g. 2026-09") }),
+  handler: async ({ month }) => {
+    const [y, m] = month.split("-").map(Number);
+    const from = businessDayStart(`${month}-01`);
+    const to = businessDayStart(`${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}-01`);
+    const owner = await db.user.findFirst({ where: { role: "OWNER" }, orderBy: { createdAt: "asc" }, select: { name: true } });
+    const ownerName = owner?.name ?? "Owner";
+
+    // Everything up to the end of the month: earlier rows feed the brought-forward lines.
+    const [payments, expenses, payouts, jobs] = await Promise.all([
+      db.payment.findMany({ where: { paidAt: { lt: to } }, include: { customer: { select: { name: true } }, invoice: { select: { ref: true } } } }),
+      db.expense.findMany({ where: { spentAt: { lt: to }, ...countedExpense }, include: { category: true, job: { select: { ref: true, customer: { select: { name: true } } } } } }),
+      db.payout.findMany({ where: { status: "PAID", paidAt: { lt: to } }, include: { staff: { select: { name: true } } } }),
+      db.job.findMany({ where: { status: "COMPLETED", scheduledAt: { lt: to } }, include: {
+        customer: { select: { name: true } }, assignments: { include: { staff: true } }, timeEntries: true,
+        invoice: { include: { items: true, payments: true, jobs: { select: { id: true, scheduledAt: true, revenueCents: true, status: true } } } },
+      } }),
+    ]);
+    const inMonth = (d: Date) => d >= from;
+    const signed = (p: { amountCents: number; isRefund: boolean }) => (p.isRefund ? -p.amountCents : p.amountCents);
+    const payoutLabel = (p: { kind: string; staff: { name: string } }) => `${p.staff.name} · ${p.kind === "REIMBURSEMENT" ? "reimbursement" : "job pay"}`;
+
+    /* The owner's sheet: cash in and out, plus work done and still unpaid. */
+    const ownerCash = (d: Date) => d < from;
+    const ownerIn = payments.filter((p) => !p.receivedById);
+    const ownerOutExp = expenses.filter((e) => !e.staffId);
+    const ownerRows: LedgerRow[] = [
+      ...ownerIn.filter((p) => inMonth(p.paidAt)).map((p) => row(p.paidAt, `${p.customer.name}${p.isRefund ? " (refund)" : ""}`, { collectedCents: signed(p) }, p.invoice?.ref)),
+      ...ownerOutExp.filter((e) => inMonth(e.spentAt)).map((e) => row(e.spentAt, e.vendor || e.category?.name || "Expense", { paidCents: e.amountCents }, e.ref)),
+      ...payouts.filter((p) => inMonth(p.paidAt!)).map((p) => row(p.paidAt!, payoutLabel(p), { paidCents: p.amountCents }, p.ref)),
+      ...jobs.filter((j) => inMonth(j.scheduledAt)).flatMap((j) => {
+        const owing = j.invoice ? (j.invoice.status === "VOID" ? 0 : unpaidOnJob(j.invoice, j.id)) : j.revenueCents;
+        return owing > 0 ? [row(j.scheduledAt, j.customer.name, { uncollectedCents: owing }, j.invoice?.ref ?? j.ref)] : [];
+      }),
+    ].sort(byDate);
+    const ownerBf = ownerIn.filter((p) => ownerCash(p.paidAt)).reduce((a, p) => a + signed(p), 0)
+      - ownerOutExp.filter((e) => ownerCash(e.spentAt)).reduce((a, e) => a + e.amountCents, 0)
+      - payouts.filter((p) => ownerCash(p.paidAt!)).reduce((a, p) => a + p.amountCents, 0);
+    const ownerTotals = { collectedCents: sumOf(ownerRows, "collectedCents"), paidCents: sumOf(ownerRows, "paidCents"), uncollectedCents: sumOf(ownerRows, "uncollectedCents") };
+
+    /* One sheet per worker: what they paid and earned, what came back to them. */
+    const staff = await db.staff.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
+    const workers = staff.map((s) => {
+      const all: { at: Date; r: LedgerRow }[] = [
+        ...expenses.filter((e) => e.staffId === s.id).map((e) => ({ at: e.spentAt, r: row(e.spentAt,
+          `${e.category?.name ?? "Expense"}${e.job ? ` · ${e.job.customer.name}` : ""}`,
+          isDriver(e.category?.name) ? { driverCents: e.amountCents } : { expenseCents: e.amountCents }, e.ref) })),
+        ...jobs.flatMap((j) => j.assignments.filter((a) => a.staffId === s.id).map((a) =>
+          ({ at: j.scheduledAt, r: row(j.scheduledAt, `Driver · ${j.customer.name}`, { driverCents: labourFor(j, a, j.timeEntries).costCents }, j.ref) }))),
+        ...payouts.filter((p) => p.staffId === s.id).map((p) => ({ at: p.paidAt!, r: row(p.paidAt!, `${ownerName} · ${p.kind === "REIMBURSEMENT" ? "reimbursement" : "job pay"}`, { fromOwnerCents: p.amountCents }, p.ref) })),
+        ...payments.filter((p) => p.receivedById === s.id).map((p) => ({ at: p.paidAt, r: row(p.paidAt, p.customer.name, { fromCustomerCents: signed(p) }, p.invoice?.ref) })),
+      ].filter(({ r }) => ["expenseCents", "driverCents", "fromOwnerCents", "fromCustomerCents"].some((k) => r[k]));
+      const net = (r: LedgerRow) => (Number(r.expenseCents) || 0) + (Number(r.driverCents) || 0) - (Number(r.fromOwnerCents) || 0) - (Number(r.fromCustomerCents) || 0);
+      const rows = all.filter((x) => x.at >= from).map((x) => x.r).sort(byDate);
+      const broughtForwardCents = all.filter((x) => x.at < from).reduce((a, x) => a + net(x.r), 0);
+      const totals = { expenseCents: sumOf(rows, "expenseCents"), driverCents: sumOf(rows, "driverCents"), fromOwnerCents: sumOf(rows, "fromOwnerCents"), fromCustomerCents: sumOf(rows, "fromCustomerCents") };
+      return { staffId: s.id, name: s.name, rows, totals, broughtForwardCents,
+        owedCents: broughtForwardCents + rows.reduce((a, r) => a + net(r), 0),
+        driverEarnedToDateCents: sumOf(all.map((x) => x.r), "driverCents") };
+    }).filter((w) => w.rows.length || w.broughtForwardCents);
+
+    return {
+      month, ownerName,
+      owner: { rows: ownerRows, totals: ownerTotals, broughtForwardCents: ownerBf, balanceCents: ownerBf + ownerTotals.collectedCents - ownerTotals.paidCents },
+      workers,
+    };
+  },
 });
